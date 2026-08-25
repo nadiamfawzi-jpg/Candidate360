@@ -4,7 +4,7 @@ import os
 from openai import OpenAI
 
 
-MODEL_NAME = "nvidia/nemotron-3-nano-30b-a3b:free"
+MODEL_NAME = "openrouter/free"
 
 
 def get_client(api_key=""):

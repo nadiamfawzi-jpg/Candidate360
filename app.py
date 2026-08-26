@@ -408,26 +408,47 @@ with delivery_tab:
     if "delivery_result" in st.session_state:
         result = st.session_state.delivery_result
         st.markdown("### Observation summary")
-        if "analysed_frames" in result:
-            first, second, third, fourth = st.columns(4)
-            first.metric("Frames analysed", result.get("analysed_frames", 0))
-            second.metric("Person visible", f'{result.get("person_visibility", 0)}%')
-            third.metric("Average keypoints", result.get("average_keypoints", 0))
-            fourth.metric("Expression output", result.get("main_expression", "Not available"))
-        else:
-            first, second = st.columns(2)
-            first.metric("People detected", result.get("people", 0))
-            second.metric("Visible keypoints", result.get("keypoints_visible", 0))
-            expressions = result.get("expressions", [])
-            if expressions:
-                st.markdown("**Ranked expression-model outputs**")
-                for item in expressions:
-                    score = round(item.get("score", 0) * 100, 1)
-                    st.write(f'{item.get("label", "Unknown").title()}: {score}%')
-                    st.progress(min(max(item.get("score", 0), 0), 1))
-            else:
-                st.info("Expression output is unavailable. Add the trained facial-expression model and class names to the models folder.")
-        st.caption("Expression labels are model predictions, not verified inner feelings.")
+       f "analysed_frames" in result:
+    first, second = st.columns(2)
+
+    first.metric("Person visible", f'{result.get("person_visibility", 0)}%')
+
+    second.metric("Expression output", result.get("main_expression", "Not available").title())
+
+else:
+    first, second = st.columns(2)
+
+    first.metric("People detected", result.get("people", 0))
+
+    expressions = result.get("expressions", [])
+
+    main_expression = "Not available"
+    if expressions:
+        main_expression = expressions[0].get(
+            "label",
+            "Not available").title()
+
+    second.metric("Expression output", main_expression)
+
+
+expressions = result.get("expressions", [])
+
+if expressions:
+    st.markdown("**Ranked expression-model outputs**")
+
+    for item in expressions:
+        score = round(item.get("score", 0) * 100, 1)
+        label = item.get("label", "Unknown").title()
+
+        st.write(f"{label}: {score}%")
+        st.progress(min(max(item.get("score", 0), 0), 1))
+
+else:
+    st.info("Expression output is unavailable. Add the trained "
+        "facial-expression model and class names to the models folder.")
+
+st.caption("Expression labels are model predictions of visible facial patterns, "
+    "not verified inner feelings.")
 
 with summary_tab:
     st.subheader("Turn practice into a plan")

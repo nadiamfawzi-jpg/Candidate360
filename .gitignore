@@ -1,0 +1,13 @@
+.env
+.streamlit/secrets.toml
+__pycache__/
+*.wav
+*.m4a
+*.mp3
+*.mp4
+*.avi
+runs/
+yolo_results/
+data/
+datasets/
+archive.zip

@@ -1,0 +1,16 @@
+{
+  "majority_baseline_accuracy": 0.24714405126776262,
+  "test_loss": 1.5238038301467896,
+  "test_accuracy": 0.4866257905960083,
+  "macro_f1": 0.42563368953779285,
+  "number_of_test_images": 7178,
+  "class_names": [
+    "angry",
+    "disgust",
+    "fear",
+    "happy",
+    "neutral",
+    "sad",
+    "surprise"
+  ]
+}

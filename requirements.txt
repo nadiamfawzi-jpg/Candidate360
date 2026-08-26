@@ -1,0 +1,13 @@
+streamlit>=1.49
+openai>=1.30
+python-dotenv
+pandas
+pypdf
+python-docx
+transformers
+tensorflow
+torch
+torchaudio
+soundfile
+ultralytics
+opencv-python-headless

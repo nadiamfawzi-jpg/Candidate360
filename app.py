@@ -5,6 +5,7 @@ import streamlit as st
 
 from api_utils import analyse_cv_job, create_questions, create_session_summary, evaluate_answer
 from document_utils import read_cv
+from vision_utils import*
 
 
 st.set_page_config(page_title="Candidate360", page_icon="✦", layout="wide")

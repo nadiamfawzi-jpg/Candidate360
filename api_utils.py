@@ -1,7 +1,7 @@
 import json
 import os
 
-MODEL_NAME = "openrouter/free"
+MODEL_NAME = "dots-studio/dots-3-note-preview:free"
 
 
 def get_client(api_key=""):

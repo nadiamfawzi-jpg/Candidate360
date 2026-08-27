@@ -71,11 +71,35 @@ def create_html_report(report):
 
     visual_text = "Not completed"
     if visual:
-        visual_text = ", ".join(
-            f"{str(key).replace('_', ' ').title()}: {value}"
-            for key, value in visual.items()
-            if key != "expressions"
-        )
+        visual_parts = []
+        if "person_visibility" in visual:
+            visual_parts.append(
+                f"Person visible: {visual.get('person_visibility', 0)}%"
+            )
+        elif "people" in visual:
+            visual_parts.append(
+                f"People detected: {visual.get('people', 0)}"
+            )
+
+        expressions = visual.get("expressions", [])
+        if expressions:
+            expression_text = ", ".join(
+                f"{item.get('label', 'Unknown').title()} "
+                f"{round(item.get('score', 0) * 100, 1)}%"
+                for item in expressions
+            )
+            visual_parts.append("Expression outputs: " + expression_text)
+
+        gestures = visual.get("gestures", [])
+        if gestures:
+            gesture_text = ", ".join(
+                f"{item.get('label', 'Unknown')} "
+                f"{round(item.get('score', 0) * 100, 1)}%"
+                for item in gestures
+            )
+            visual_parts.append("Hand-gesture outputs: " + gesture_text)
+
+        visual_text = "; ".join(visual_parts) or "Not available"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -120,8 +144,16 @@ def get_speech_model():
 
 @st.cache_resource
 def get_vision_models():
-    from vision_utils import load_face_model, load_pose_model
-    return load_pose_model(), load_face_model()
+    from vision_utils import (
+        load_face_model,
+        load_gesture_recognizer,
+        load_pose_model
+    )
+    return (
+        load_pose_model(),
+        load_face_model(),
+        load_gesture_recognizer()
+    )
 
 
 def get_face_model_status():
@@ -142,6 +174,27 @@ def get_face_model_status():
         }
 
     return {"ready": True, "message": "Facial-expression model files are available."}
+
+
+def get_gesture_model_status():
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(
+        project_dir,
+        "models",
+        "gesture_recognizer.task"
+    )
+    if not os.path.exists(model_path):
+        return {
+            "ready": False,
+            "message": (
+                "Hand-gesture output is unavailable. Missing: "
+                "models/gesture_recognizer.task"
+            )
+        }
+    return {
+        "ready": True,
+        "message": "MediaPipe hand-gesture model is available."
+    }
 
 st.markdown("""
 <style>
@@ -408,6 +461,11 @@ with delivery_tab:
         st.success("Facial-expression model files are available.")
     else:
         st.warning(face_model_status["message"])
+    gesture_model_status = get_gesture_model_status()
+    if gesture_model_status["ready"]:
+        st.success(gesture_model_status["message"])
+    else:
+        st.warning(gesture_model_status["message"])
     media_file = st.file_uploader("Upload an interview image or video", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"], key="delivery_media")
     if media_file is not None:
         if media_file.type.startswith("video"):
@@ -415,17 +473,37 @@ with delivery_tab:
         else:
             st.image(media_file, width=520)
 
-        if st.button("Run YOLO26 pose + expression observation"):
+        if st.button("Run pose, expression + hand-gesture observation"):
             try:
-                with st.spinner("Loading the optional vision models..."):
+                with st.spinner(
+                    "Analysing pose, facial-expression and hand-gesture outputs..."
+                ):
                     from vision_utils import analyse_image, analyse_video, save_upload
                     media_path = save_upload(media_file)
-                    pose_model, face_model_data = get_vision_models()
-                    if media_file.type.startswith("video"):
-                        delivery_result = analyse_video(media_path, pose_model, face_model_data)
-                    else:
-                        delivery_result = analyse_image(media_path, pose_model, face_model_data)
-                    st.session_state.delivery_result = delivery_result
+                    try:
+                        (
+                            pose_model,
+                            face_model_data,
+                            gesture_model_data
+                        ) = get_vision_models()
+                        if media_file.type.startswith("video"):
+                            delivery_result = analyse_video(
+                                media_path,
+                                pose_model,
+                                face_model_data,
+                                gesture_model_data
+                            )
+                        else:
+                            delivery_result = analyse_image(
+                                media_path,
+                                pose_model,
+                                face_model_data,
+                                gesture_model_data
+                            )
+                        st.session_state.delivery_result = delivery_result
+                    finally:
+                        if os.path.exists(media_path):
+                            os.remove(media_path)
                 st.success("Observation complete.")
             except Exception as error:
                 st.error(str(error))
@@ -439,7 +517,7 @@ with delivery_tab:
             first, second = st.columns(2)
             first.metric("Person visible", f'{result.get("person_visibility", 0)}%')
             second.metric(
-                "Expression output",
+                "Most frequent expression output",
                 result.get("main_expression", "Not available").title()
             )
         else:
@@ -450,10 +528,20 @@ with delivery_tab:
             if expressions:
                 main_expression = expressions[0].get("label", "Not available").title()
 
-            second.metric("Expression output", main_expression)
+            second.metric("Top expression output", main_expression)
 
         if expressions:
-            st.markdown("**Ranked expression-model outputs**")
+            if "analysed_frames" in result:
+                st.markdown("#### Facial-expression distribution")
+                st.caption(
+                    "Percentage of successfully classified sampled video "
+                    "moments in which each label was the model's top output."
+                )
+            else:
+                st.markdown("#### Ranked expression-model outputs")
+                st.caption(
+                    "Model confidence scores for the uploaded image."
+                )
             for item in expressions:
                 score = round(item.get("score", 0) * 100, 1)
                 st.write(f'{item.get("label", "Unknown").title()}: {score}%')
@@ -464,7 +552,38 @@ with delivery_tab:
                 st.error("Expression model error: " + expression_error)
             else:
                 st.info("Expression output is unavailable. Add face_expression_model.keras and class_names.json to the models folder.")
-        st.caption("Expression labels are model predictions, not verified inner feelings.")
+
+        gestures = result.get("gestures", [])
+        if gestures:
+            st.markdown("#### MediaPipe hand-gesture distribution")
+            if "analysed_frames" in result:
+                st.caption(
+                    "Percentage of recognised hand observations assigned "
+                    "to each visible gesture."
+                )
+            else:
+                st.caption(
+                    "MediaPipe confidence scores for gestures visible in "
+                    "the uploaded image."
+                )
+            for item in gestures:
+                score = round(item.get("score", 0) * 100, 1)
+                st.write(f'{item.get("label", "Unknown")}: {score}%')
+                st.progress(min(max(item.get("score", 0), 0), 1))
+        else:
+            gesture_error = result.get("gesture_error", "")
+            if gesture_error:
+                st.error("Hand-gesture model error: " + gesture_error)
+            else:
+                st.info(
+                    "No supported hand gesture was detected in the "
+                    "sampled moments."
+                )
+
+        st.caption(
+            "Expression and gesture labels are visible model outputs. "
+            "They do not verify inner feelings, nervousness or confidence."
+        )
 
 with summary_tab:
     st.subheader("Turn practice into a plan")

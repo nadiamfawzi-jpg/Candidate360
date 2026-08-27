@@ -1,16 +1,21 @@
 import json
 import os
 
-from openai import OpenAI
-
-
-MODEL_NAME = "openrouter/free"
+MODEL_NAME = "dots-studio/dots-3-note-preview:free"
 
 
 def get_client(api_key=""):
     key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
     if not key:
         return None
+
+    try:
+        from openai import OpenAI
+    except ImportError as error:
+        raise ImportError(
+            "The OpenAI client is not installed. Add openai>=1.30 to "
+            "requirements.txt and reboot the Streamlit app."
+        ) from error
 
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
@@ -22,7 +27,7 @@ def get_client(api_key=""):
 def get_llm_response(prompt, system_message, api_key=""):
     client = get_client(api_key)
     if client is None:
-        raise ValueError("Add your OpenRouter API key in Streamlit Secrets or in the sidebar.")
+        raise ValueError("Add OPENAI_API_KEY to Streamlit Secrets.")
 
     completion = client.chat.completions.create(
         model=MODEL_NAME,
@@ -49,6 +54,53 @@ def get_json_response(prompt, system_message, api_key=""):
         raise ValueError("The API did not return the expected JSON. Please try again.")
 
     return json.loads(clean_response[start:end + 1])
+
+
+def build_interview(cv_text, job_description, target_role, api_key=""):
+    prompt = f"""
+Create the CV analysis and six interview questions in one response.
+
+Target role: {target_role}
+
+CV:
+{cv_text[:12000]}
+
+Job description:
+{job_description[:8000]}
+
+Return JSON only with this exact structure:
+{{
+  "cv_analysis": {{
+    "match_summary": "short evidence-based summary",
+    "cv_strengths": ["strength 1", "strength 2", "strength 3"],
+    "missing_or_unclear": ["gap 1", "gap 2", "gap 3"],
+    "skills_to_prove": ["skill 1", "skill 2", "skill 3"],
+    "match_score": 0
+  }},
+  "questions": [
+    {{
+      "type": "Behavioural",
+      "question": "question text",
+      "purpose": "what it tests"
+    }}
+  ]
+}}
+
+Return exactly six fair, role-related questions using a balanced mix of
+introduction, behavioural, situational, role-specific, CV-evidence and
+closing questions. The match score must be from 0 to 100 and is only a
+practice estimate. Use only supplied evidence. Do not infer protected or
+personal characteristics.
+"""
+    system_message = (
+        "You are a careful CV analyst and supportive interviewer. "
+        "Do not invent evidence. Return valid JSON only."
+    )
+    result = get_json_response(prompt, system_message, api_key)
+    return {
+        "cv_analysis": result.get("cv_analysis", {}),
+        "questions": result.get("questions", [])
+    }
 
 
 def analyse_cv_job(cv_text, job_description, target_role, api_key=""):

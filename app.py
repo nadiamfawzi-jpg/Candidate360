@@ -1,10 +1,11 @@
 import html
+import hashlib
 import json
 import os
 
 import streamlit as st
 
-from api_utils import analyse_cv_job, create_questions, create_session_summary, evaluate_answer
+from api_utils import build_interview, create_session_summary, evaluate_answer
 from document_utils import read_cv
 
 
@@ -13,30 +14,197 @@ st.set_page_config(page_title="Candidate360", page_icon="✦", layout="wide")
 
 ROLE_OPTIONS = [
     "Accountant",
+    "Accounting",
+    "Actuary",
+    "Administration",
     "Administrative Assistant",
+    "Advertising",
+    "Aerospace Engineer",
+    "Aerospace Engineering",
+    "Agricultural Engineer",
+    "Agriculture",
+    "Airline Cabin Crew",
+    "Animation",
+    "Anthropology",
+    "App Developer",
+    "Archaeology",
     "Architect",
+    "Architecture",
+    "Art and Design",
+    "Artificial Intelligence",
+    "Artificial Intelligence Specialist",
+    "Auditor",
+    "Automotive Engineer",
+    "Banking",
+    "Biochemistry",
+    "Biology",
+    "Biomedical Engineer",
+    "Biomedical Engineering",
+    "Biotechnology",
+    "Brand Manager",
+    "Business",
+    "Business Administration",
     "Business Analyst",
+    "Business Development Specialist",
+    "Business Management",
+    "Chemical Engineer",
+    "Chemical Engineering",
+    "Chemistry",
     "Civil Engineer",
+    "Civil Engineering",
+    "Clinical Psychologist",
+    "Communications",
+    "Communications Specialist",
+    "Computer Engineer",
+    "Computer Engineering",
+    "Computer Programmer",
+    "Computer Science",
+    "Construction Manager",
+    "Content Creator",
+    "Content Writer",
+    "Corporate Communications",
+    "Criminology",
+    "Customer Service",
     "Customer Service Representative",
     "Data Analyst",
+    "Data Engineer",
+    "Data Science",
     "Data Scientist",
+    "Database Administrator",
+    "Dentist",
+    "Dentistry",
+    "Design",
+    "Dietitian",
     "Digital Marketing Specialist",
     "Doctor",
+    "E-commerce Specialist",
+    "Economics",
+    "Education",
     "Electrical Engineer",
+    "Electrical Engineering",
+    "Electronics Engineer",
+    "Emergency Medical Technician",
+    "Engineering",
+    "English Language and Literature",
+    "Environmental Engineer",
+    "Environmental Science",
+    "Event Coordinator",
+    "Fashion Design",
+    "Fashion Designer",
+    "Film Production",
+    "Finance",
     "Finance Officer",
+    "Financial Analyst",
+    "Flight Attendant",
+    "Food Science",
+    "Forensic Science",
+    "General Manager",
+    "Geology",
+    "Graphic Design",
     "Graphic Designer",
+    "Healthcare",
+    "Healthcare Administration",
+    "Health and Safety Officer",
+    "Hospitality",
+    "Hospitality Management",
+    "Hotel Manager",
+    "Hotel Receptionist",
     "HR Operations Executive",
+    "Human Resources",
     "Human Resources Specialist",
+    "Industrial Engineer",
+    "Industrial Engineering",
+    "Information Systems",
+    "Information Technology",
+    "Insurance Specialist",
+    "Interior Design",
+    "Interior Designer",
+    "International Business",
+    "International Relations",
+    "IT",
     "IT Support Specialist",
+    "Journalism",
+    "Journalist",
+    "Laboratory Technician",
+    "Law",
+    "Lawyer",
+    "Legal Assistant",
+    "Librarian",
+    "Logistics",
+    "Logistics Coordinator",
+    "Management",
+    "Marine Engineer",
+    "Marine Engineering",
+    "Marketing",
     "Marketing Executive",
+    "Mathematics",
     "Mechanical Engineer",
+    "Mechanical Engineering",
+    "Media Studies",
+    "Medicine",
+    "Mobile App Developer",
+    "Network Engineer",
     "Nurse",
+    "Nursing",
+    "Nutrition",
+    "Nutritionist",
+    "Office Administrator",
     "Operations Coordinator",
+    "Operations Manager",
+    "Paralegal",
+    "Petroleum Engineer",
+    "Petroleum Engineering",
     "Pharmacist",
+    "Pharmacy",
+    "Photography",
+    "Photographer",
+    "Physics",
+    "Physiotherapist",
+    "Physiotherapy",
+    "Political Science",
+    "Procurement Specialist",
+    "Product Designer",
+    "Product Manager",
+    "Production Engineer",
+    "Project Coordinator",
     "Project Manager",
+    "Psychology",
+    "Public Administration",
+    "Public Health",
+    "Public Relations",
+    "Public Relations Specialist",
+    "Quality Assurance Specialist",
+    "Radiographer",
+    "Radiography",
+    "Real Estate Agent",
+    "Receptionist",
+    "Research Assistant",
+    "Risk Analyst",
+    "Safety Engineer",
+    "Sales",
     "Sales Executive",
+    "Science",
+    "Secretary",
+    "Social Media Specialist",
+    "Social Work",
+    "Social Worker",
+    "Sociology",
+    "Software Developer",
     "Software Engineer",
-    "Teacher"
+    "Statistics",
+    "Supply Chain Management",
+    "Supply Chain Specialist",
+    "Systems Analyst",
+    "Teacher",
+    "Teaching",
+    "Telecommunications Engineer",
+    "Tourism",
+    "Translation",
+    "Translator",
+    "UI/UX Designer",
+    "Veterinary Doctor",
+    "Veterinary Medicine",
+    "Web Developer"
 ]
 
 
@@ -71,11 +239,37 @@ def create_html_report(report):
 
     visual_text = "Not completed"
     if visual:
-        visual_text = ", ".join(
-            f"{str(key).replace('_', ' ').title()}: {value}"
-            for key, value in visual.items()
-            if key != "expressions"
-        )
+        visual_parts = []
+        if "person_visibility" in visual:
+            visual_parts.append(
+                f"Person visible: {visual.get('person_visibility', 0)}%"
+            )
+        elif "people" in visual:
+            visual_parts.append(
+                f"People detected: {visual.get('people', 0)}"
+            )
+
+        expressions = visual.get("expressions", [])
+        if expressions:
+            expression_text = ", ".join(
+                f"{item.get('label', 'Unknown').title()} "
+                f"{round(item.get('score', 0) * 100, 1)}%"
+                for item in expressions
+            )
+            visual_parts.append("Expression outputs: " + expression_text)
+
+        confidence_outputs = visual.get("confidence_outputs", [])
+        if confidence_outputs:
+            confidence_text = ", ".join(
+                f"{item.get('label', 'Unknown')} "
+                f"{round(item.get('score', 0) * 100, 1)}%"
+                for item in confidence_outputs
+            )
+            visual_parts.append(
+                "Confidence-dataset labels: " + confidence_text
+            )
+
+        visual_text = "; ".join(visual_parts) or "Not available"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -99,7 +293,7 @@ h2{{color:#173a5e}}h3{{margin-bottom:5px;color:#225174}}li{{margin-bottom:6px}}
 <header class="hero"><div>CANDIDATE360</div><h1>Interview Practice Report</h1><p>Target role: {target_role}</p></header>
 <section class="card"><div class="number">OPPORTUNITY MAP</div><h2>{html.escape(str(cv_analysis.get("match_summary", "CV and job analysis")))}</h2>
 <div class="score">Practice match: {html.escape(str(cv_analysis.get("match_score", 0)))}%</div>
-{report_list("Evidence strengths", cv_analysis.get("cv_strengths", []))}
+{report_list("Skills and experience found in the CV", cv_analysis.get("cv_strengths", []))}
 {report_list("Skills to prove", cv_analysis.get("skills_to_prove", []))}</section>
 <section class="card"><div class="number">FINAL COACH SUMMARY</div><h2>{html.escape(str(summary.get("headline", "Interview debrief")))}</h2>
 <p>{html.escape(str(summary.get("overall_progress", "")))}</p>
@@ -120,8 +314,16 @@ def get_speech_model():
 
 @st.cache_resource
 def get_vision_models():
-    from vision_utils import load_face_model, load_pose_model
-    return load_pose_model(), load_face_model()
+    from vision_utils import (
+        load_confidence_model,
+        load_expression_model,
+        load_pose_model
+    )
+    return (
+        load_pose_model(),
+        load_expression_model(),
+        load_confidence_model()
+    )
 
 
 def get_face_model_status():
@@ -143,10 +345,38 @@ def get_face_model_status():
 
     return {"ready": True, "message": "Facial-expression model files are available."}
 
+
+def get_confidence_model_status():
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(project_dir, "models", "confidence_model.keras")
+    class_path = os.path.join(
+        project_dir,
+        "models",
+        "confidence_class_names.json"
+    )
+
+    missing_files = []
+    if not os.path.exists(model_path):
+        missing_files.append("models/confidence_model.keras")
+    if not os.path.exists(class_path):
+        missing_files.append("models/confidence_class_names.json")
+
+    if missing_files:
+        return {
+            "ready": False,
+            "message": (
+                "Confidence-dataset output is unavailable. Missing: "
+                + ", ".join(missing_files)
+            )
+        }
+    return {
+        "ready": True,
+        "message": "Confidence-dataset model files are available."
+    }
+
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap');
-html,body,[class*="css"]{font-family:'Manrope',sans-serif}
+html,body,[class*="css"]{font-family:'Segoe UI',Arial,sans-serif}
 .stApp{background:radial-gradient(circle at 85% 0%,#123758 0,transparent 25%),#07111f;color:#eef6ff}
 .block-container{max-width:1320px;padding:1.5rem 2rem 4rem}
 
@@ -188,19 +418,25 @@ textarea::placeholder,input::placeholder{color:#667b91!important;opacity:1!impor
 .stButton>button,.stDownloadButton>button{background:linear-gradient(90deg,#20bfa7,#2779d8);color:white!important;border:0;border-radius:12px;font-size:1rem;font-weight:800;min-height:48px;box-shadow:0 8px 24px #1f9f9d45}
 .stButton>button:hover,.stDownloadButton>button:hover{filter:brightness(1.12);transform:translateY(-1px)}
 
-/* Equal metrics and clearer navigation */
+/* Equal metrics and highly visible stage navigation */
 div[data-testid="stMetric"]{box-sizing:border-box;min-height:126px;background:#101f32;border:1px solid #34516e;padding:18px;border-radius:16px}
 [data-testid="stMetricLabel"] p{color:#bfd1e3!important;font-size:.95rem!important;font-weight:700!important}
 [data-testid="stMetricValue"]{color:#ffffff!important;font-size:1.85rem!important}
 [data-testid="stTabs"]{margin-top:24px}
-[data-testid="stTabs"] [role="tablist"]{gap:8px}
-[data-testid="stTabs"] button{min-height:52px;padding:0 18px;font-size:1rem;font-weight:800;color:#bcd0e4;border-radius:12px 12px 0 0}
-[data-testid="stTabs"] button[aria-selected="true"]{color:#67f1d9;background:#11243a}
+[data-testid="stTabs"] [role="tablist"]{display:flex;gap:10px;background:#0b1a2d;border:1px solid #294866;border-radius:16px;padding:9px;box-shadow:0 12px 34px #0005}
+[data-testid="stTabs"] button[role="tab"]{flex:1;min-height:58px;padding:10px 16px;background:#122740;border:1px solid #315777;border-radius:12px;color:#dcecff!important;font-size:1rem;font-weight:800;white-space:normal}
+[data-testid="stTabs"] button[role="tab"] p{color:#dcecff!important;font-size:1rem!important;font-weight:800!important;text-align:center}
+[data-testid="stTabs"] button[role="tab"]:hover{background:#193452;border-color:#4d789c}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"]{background:linear-gradient(120deg,#14aF9f,#167fd0);border-color:#64ead6;box-shadow:0 8px 22px #0ea5a544;color:#ffffff!important}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p{color:#ffffff!important}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"]{display:none}
 .stProgress>div>div{background:linear-gradient(90deg,#25c8ad,#3288ec)}
 hr{border-color:#2c4661!important;margin:2rem 0!important}
 
 @media(max-width:800px){
   .block-container{padding:1rem 1rem 3rem}.hero{padding:30px 24px}.hero h1{font-size:2.25rem!important}.hero p{font-size:1.02rem}.glass{height:auto;min-height:160px}
+  [data-testid="stTabs"] [role="tablist"]{flex-wrap:wrap}
+  [data-testid="stTabs"] button[role="tab"]{flex:1 1 46%;min-width:145px}
 }
 </style>
 """, unsafe_allow_html=True)
@@ -209,11 +445,11 @@ st.markdown("""
 <div class="hero"><div class="eyebrow">CANDIDATE360 • AI INTERVIEW COACH</div>
 <h1>See your complete story.<br>Practise your strongest interview.</h1>
 <p>Turn your CV and a real job description into a tailored interview, answer by text or voice,
-correct the transcript, review job-related evidence, and leave with a focused practice plan.</p></div>
+correct the transcript, review relevant skills and experience, and leave with a focused practice plan.</p></div>
 """, unsafe_allow_html=True)
 
 for column, item in zip(st.columns(4), [
-    ("01", "CV Analyst", "Finds evidence, strengths and gaps in the CV and role."),
+    ("01", "CV Analyst", "Finds relevant skills, experience and gaps in the CV and role."),
     ("02", "Interviewer", "Creates fair questions tailored to the target position."),
     ("03", "Answer Coach", "Reviews relevance, structure, specificity and alignment."),
     ("04", "Summary Coach", "Turns the session into clear next-practice actions.")
@@ -237,12 +473,12 @@ with st.sidebar:
     st.title("✦ Studio controls")
     st.markdown("**Set the role before building your interview.**")
     target_role = st.selectbox(
-        "Target role",
+        "Target role or major",
         ROLE_OPTIONS,
         index=None,
-        placeholder="Search or type a role...",
+        placeholder="Search or type a role or major...",
         accept_new_options=True,
-        help="Start typing to filter the suggestions. You can also enter a role that is not listed."
+        help="Start typing to filter the suggestions. You can also enter a role, major or study field that is not listed."
     )
     st.divider()
     if api_key:
@@ -262,10 +498,20 @@ with setup_tab:
         cv_file = st.file_uploader("Upload CV", type=["pdf", "docx", "txt"])
         if cv_file is not None:
             try:
-                st.session_state.cv_text = read_cv(cv_file)
+                cv_fingerprint = hashlib.sha256(cv_file.getvalue()).hexdigest()
+                if st.session_state.get("cv_file_fingerprint") != cv_fingerprint:
+                    cv_file.seek(0)
+                    st.session_state.cv_text = read_cv(cv_file)
+                    st.session_state.cv_file_fingerprint = cv_fingerprint
                 st.success(f"Read {len(st.session_state.cv_text):,} characters from the CV.")
                 with st.expander("Check extracted CV text"):
-                    st.text_area("CV text", st.session_state.cv_text, height=240)
+                    edited_cv_text = st.text_area(
+                        "CV text",
+                        value=st.session_state.cv_text,
+                        height=240,
+                        help="Correct any PDF extraction mistakes here before running the CV Analyst."
+                    )
+                    st.session_state.cv_text = edited_cv_text
             except Exception as error:
                 st.error(str(error))
     with right:
@@ -280,11 +526,16 @@ with setup_tab:
         else:
             try:
                 with st.spinner("The CV Analyst and Interviewer are preparing your studio..."):
-                    st.session_state.cv_analysis = analyse_cv_job(
+                    interview_setup = build_interview(
                         st.session_state.cv_text, st.session_state.job_description, target_role, api_key
                     )
-                    st.session_state.questions = create_questions(
-                        st.session_state.cv_text, st.session_state.job_description, target_role, api_key
+                    st.session_state.cv_analysis = interview_setup.get(
+                        "cv_analysis",
+                        {}
+                    )
+                    st.session_state.questions = interview_setup.get(
+                        "questions",
+                        []
                     )
                     st.session_state.answer_results = []
                     st.session_state.question_index = 0
@@ -297,12 +548,12 @@ with setup_tab:
         st.markdown("### Opportunity map")
         a, b, c = st.columns(3)
         a.metric("Practice match", f'{result.get("match_score", 0)}%')
-        b.metric("Evidence strengths", len(result.get("cv_strengths", [])))
+        b.metric("CV strengths found", len(result.get("cv_strengths", [])))
         c.metric("Skills to prove", len(result.get("skills_to_prove", [])))
         st.write(result.get("match_summary", ""))
         col1, col2, col3 = st.columns(3)
         for column, title, values in [
-            (col1, "Evidence already present", result.get("cv_strengths", [])),
+            (col1, "Skills and experience found in your CV", result.get("cv_strengths", [])),
             (col2, "Missing or unclear", result.get("missing_or_unclear", [])),
             (col3, "Prove in the interview", result.get("skills_to_prove", []))
         ]:
@@ -367,7 +618,7 @@ with practice_tab:
                 st.warning("Type, record or upload an answer first.")
             else:
                 try:
-                    with st.spinner("The Answer Coach is reviewing evidence and structure..."):
+                    with st.spinner("The Answer Coach is reviewing your answer and structure..."):
                         result = evaluate_answer(
                             question, answer, st.session_state.cv_text,
                             st.session_state.job_description, api_key
@@ -402,12 +653,21 @@ with practice_tab:
 
 with delivery_tab:
     st.subheader("Optional visual delivery observations")
-    st.markdown('<div class="notice"><b>Important:</b> These models describe visible model outputs only. They cannot determine true emotion, nervousness, confidence, honesty, personality or job suitability. Visual results are excluded from the answer score.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="notice"><b>Important:</b> These models describe visible dataset-label outputs only. They cannot determine true emotion, nervousness, confidence, honesty, personality or job suitability. Visual results are excluded from the answer score.</div>', unsafe_allow_html=True)
     face_model_status = get_face_model_status()
     if face_model_status["ready"]:
         st.success("Facial-expression model files are available.")
     else:
         st.warning(face_model_status["message"])
+    confidence_model_status = get_confidence_model_status()
+    if confidence_model_status["ready"]:
+        st.success(confidence_model_status["message"])
+    else:
+        st.warning(confidence_model_status["message"])
+    st.caption(
+        "The first analysis loads the models once. Later analyses reuse "
+        "them and process a small set of moments across the full video."
+    )
     media_file = st.file_uploader("Upload an interview image or video", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"], key="delivery_media")
     if media_file is not None:
         if media_file.type.startswith("video"):
@@ -415,18 +675,52 @@ with delivery_tab:
         else:
             st.image(media_file, width=520)
 
-        if st.button("Run YOLO26 pose + expression observation"):
+        if st.button("Run person + face-model observation"):
             try:
-                with st.spinner("Loading the optional vision models..."):
-                    from vision_utils import analyse_image, analyse_video, save_upload
-                    media_path = save_upload(media_file)
-                    pose_model, face_model_data = get_vision_models()
-                    if media_file.type.startswith("video"):
-                        delivery_result = analyse_video(media_path, pose_model, face_model_data)
-                    else:
-                        delivery_result = analyse_image(media_path, pose_model, face_model_data)
-                    st.session_state.delivery_result = delivery_result
-                st.success("Observation complete.")
+                media_fingerprint = hashlib.sha256(
+                    media_file.getvalue()
+                ).hexdigest()
+
+                if (
+                    st.session_state.get("delivery_media_fingerprint")
+                    == media_fingerprint
+                    and "delivery_result" in st.session_state
+                ):
+                    st.info("Reusing the completed observation for this file.")
+                else:
+                    with st.spinner(
+                        "Sampling the video and running fast batched analysis..."
+                    ):
+                        from vision_utils import analyse_image, analyse_video, save_upload
+                        media_path = save_upload(media_file)
+                        try:
+                            (
+                                pose_model,
+                                expression_model_data,
+                                confidence_model_data
+                            ) = get_vision_models()
+                            if media_file.type.startswith("video"):
+                                delivery_result = analyse_video(
+                                    media_path,
+                                    pose_model,
+                                    expression_model_data,
+                                    confidence_model_data
+                                )
+                            else:
+                                delivery_result = analyse_image(
+                                    media_path,
+                                    pose_model,
+                                    expression_model_data,
+                                    confidence_model_data
+                                )
+                            st.session_state.delivery_result = delivery_result
+                            st.session_state.delivery_media_fingerprint = (
+                                media_fingerprint
+                            )
+                        finally:
+                            if os.path.exists(media_path):
+                                os.remove(media_path)
+                    st.success("Observation complete.")
             except Exception as error:
                 st.error(str(error))
 
@@ -439,7 +733,7 @@ with delivery_tab:
             first, second = st.columns(2)
             first.metric("Person visible", f'{result.get("person_visibility", 0)}%')
             second.metric(
-                "Expression output",
+                "Most frequent expression output",
                 result.get("main_expression", "Not available").title()
             )
         else:
@@ -450,10 +744,20 @@ with delivery_tab:
             if expressions:
                 main_expression = expressions[0].get("label", "Not available").title()
 
-            second.metric("Expression output", main_expression)
+            second.metric("Top expression output", main_expression)
 
         if expressions:
-            st.markdown("**Ranked expression-model outputs**")
+            if "analysed_frames" in result:
+                st.markdown("#### Facial-expression distribution")
+                st.caption(
+                    "Percentage of successfully classified sampled video "
+                    "moments in which each label was the model's top output."
+                )
+            else:
+                st.markdown("#### Ranked expression-model outputs")
+                st.caption(
+                    "Model confidence scores for the uploaded image."
+                )
             for item in expressions:
                 score = round(item.get("score", 0) * 100, 1)
                 st.write(f'{item.get("label", "Unknown").title()}: {score}%')
@@ -462,9 +766,46 @@ with delivery_tab:
             expression_error = result.get("expression_error", "")
             if expression_error:
                 st.error("Expression model error: " + expression_error)
+            elif result.get("face_error"):
+                st.info(result["face_error"])
             else:
                 st.info("Expression output is unavailable. Add face_expression_model.keras and class_names.json to the models folder.")
-        st.caption("Expression labels are model predictions, not verified inner feelings.")
+
+        confidence_outputs = result.get("confidence_outputs", [])
+        if confidence_outputs:
+            st.markdown("#### Confidence-dataset label distribution")
+            if "analysed_frames" in result:
+                st.caption(
+                    "Percentage of successfully classified face-cropped "
+                    "video moments assigned to each dataset label."
+                )
+            else:
+                st.caption(
+                    "Classifier scores for the dataset labels in the "
+                    "face-cropped image."
+                )
+            for item in confidence_outputs:
+                score = round(item.get("score", 0) * 100, 1)
+                st.write(f'{item.get("label", "Unknown").title()}: {score}%')
+                st.progress(min(max(item.get("score", 0), 0), 1))
+        else:
+            confidence_error = result.get("confidence_error", "")
+            if confidence_error:
+                st.error("Confidence-dataset model error: " + confidence_error)
+            elif result.get("face_error"):
+                st.info(result["face_error"])
+            else:
+                st.info(
+                    "Confidence-dataset output is unavailable. Add "
+                    "confidence_model.keras and "
+                    "confidence_class_names.json to the models folder."
+                )
+
+        st.caption(
+            "The confident/unconfident labels were manually assigned in "
+            "the source dataset. They are not verified measurements of "
+            "confidence or nervousness and are never used in answer scores."
+        )
 
 with summary_tab:
     st.subheader("Turn practice into a plan")

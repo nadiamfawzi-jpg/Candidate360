@@ -1,8 +1,23 @@
-import os
-import tempfile
-
 from docx import Document
 from pypdf import PdfReader
+
+
+def clean_pdf_text(text):
+    """Remove known standalone icon-font artifacts from extracted CV text."""
+    cleaned_lines = []
+
+    for line in text.splitlines():
+        cleaned_line = " ".join(line.split()).strip()
+
+        # Some CV templates use icon fonts for contact details. PDF text
+        # extraction can turn those icons into isolated N or F characters.
+        if cleaned_line in {"N", "F"}:
+            continue
+
+        if cleaned_line:
+            cleaned_lines.append(cleaned_line)
+
+    return "\n".join(cleaned_lines)
 
 
 def read_pdf(uploaded_file):
@@ -14,7 +29,7 @@ def read_pdf(uploaded_file):
         if page_text:
             text += page_text + "\n"
 
-    return text
+    return clean_pdf_text(text)
 
 
 def read_docx(uploaded_file):

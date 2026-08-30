@@ -2,6 +2,8 @@ import html
 import hashlib
 import json
 import os
+import tempfile
+import uuid
 
 import streamlit as st
 
@@ -225,6 +227,16 @@ def create_html_report(report):
     answer_sections = ""
     for number, item in enumerate(answers, 1):
         evaluation = item.get("evaluation", {})
+        voice = item.get("voice_evaluation", {})
+        voice_text = "Not completed"
+        if voice:
+            voice_text = (
+                f"Duration: {voice.get('duration_seconds', 0)} seconds; "
+                f"pace: {voice.get('words_per_minute', 0)} words per minute "
+                f"({voice.get('pace_label', 'Not available')}); "
+                f"listed filler words: {voice.get('filler_count', 0)} "
+                f"({voice.get('filler_label', 'Not available')})."
+            )
         answer_sections += f"""
         <section class="card">
             <div class="number">ANSWER {number}</div>
@@ -234,6 +246,8 @@ def create_html_report(report):
             <div class="score">Overall practice score: {html.escape(str(evaluation.get("overall", 0)))}%</div>
             {report_list("What worked", evaluation.get("strengths", []))}
             {report_list("Next improvements", evaluation.get("improvements", []))}
+            <h3>Recorded-voice delivery</h3>
+            <p>{html.escape(voice_text)}</p>
         </section>
         """
 
@@ -247,6 +261,10 @@ def create_html_report(report):
         elif "people" in visual:
             visual_parts.append(
                 f"People detected: {visual.get('people', 0)}"
+            )
+        if "face_visibility" in visual:
+            visual_parts.append(
+                f"Face visible: {visual.get('face_visibility', 0)}%"
             )
 
         expressions = visual.get("expressions", [])
@@ -268,6 +286,15 @@ def create_html_report(report):
             visual_parts.append(
                 "Confidence-dataset labels: " + confidence_text
             )
+
+        gestures = visual.get("gestures", [])
+        if gestures:
+            gesture_text = ", ".join(
+                f"{item.get('label', 'Unknown').title()} "
+                f"{round(item.get('score', 0) * 100, 1)}%"
+                for item in gestures
+            )
+            visual_parts.append("Hand gestures: " + gesture_text)
 
         visual_text = "; ".join(visual_parts) or "Not available"
 
@@ -301,8 +328,8 @@ h2{{color:#173a5e}}h3{{margin-bottom:5px;color:#225174}}li{{margin-bottom:6px}}
 {report_list("Priority actions", summary.get("priority_actions", []))}
 {report_list("Next practice plan", summary.get("next_practice_plan", []))}</section>
 {answer_sections}
-<section class="card"><div class="number">OPTIONAL VISUAL OBSERVATION</div><p>{html.escape(visual_text)}</p></section>
-<div class="notice"><strong>Practice-use notice:</strong> This report supports interview preparation only. It is not a hiring decision and visual outputs do not prove emotion, confidence, nervousness, honesty or personality.</div>
+<section class="card"><div class="number">VISUAL DELIVERY EVALUATION</div><p>{html.escape(visual_text)}</p></section>
+<div class="notice"><strong>Practice-use notice:</strong> This report supports interview preparation only. Answer, recorded-voice and visual feedback remain separate. Visual outputs do not prove emotion, confidence, nervousness, honesty or personality.</div>
 </main></body></html>"""
 
 
@@ -313,16 +340,40 @@ def get_speech_model():
 
 
 @st.cache_resource
+def get_pose_model():
+    from vision_utils import load_pose_model
+    return load_pose_model()
+
+
+@st.cache_resource
+def get_live_person_model():
+    from vision_utils import load_live_person_model
+    return load_live_person_model()
+
+
+@st.cache_resource
+def get_expression_model():
+    from vision_utils import load_expression_model
+    return load_expression_model()
+
+
+@st.cache_resource
+def get_confidence_model():
+    from vision_utils import load_confidence_model
+    return load_confidence_model()
+
+
+@st.cache_resource
+def get_gesture_recognizer():
+    from vision_utils import load_gesture_recognizer
+    return load_gesture_recognizer()
+
+
 def get_vision_models():
-    from vision_utils import (
-        load_confidence_model,
-        load_expression_model,
-        load_pose_model
-    )
     return (
-        load_pose_model(),
-        load_expression_model(),
-        load_confidence_model()
+        get_pose_model(),
+        get_expression_model(),
+        get_confidence_model()
     )
 
 
@@ -444,8 +495,8 @@ hr{border-color:#2c4661!important;margin:2rem 0!important}
 st.markdown("""
 <div class="hero"><div class="eyebrow">CANDIDATE360 • AI INTERVIEW COACH</div>
 <h1>See your complete story.<br>Practise your strongest interview.</h1>
-<p>Turn your CV and a real job description into a tailored interview, answer by text or voice,
-correct the transcript, review relevant skills and experience, and leave with a focused practice plan.</p></div>
+<p>Turn your CV and a real job description into a tailored interview, answer by text or recorded voice,
+use live or uploaded visual practice, and leave with separate answer, voice-delivery and visual feedback.</p></div>
 """, unsafe_allow_html=True)
 
 for column, item in zip(st.columns(4), [
@@ -613,6 +664,61 @@ with practice_tab:
             help="Correction is important for accents, names and technical terms."
         )
 
+        if audio_file is not None:
+            if st.button(
+                "Evaluate recorded-voice delivery",
+                use_container_width=True
+            ):
+                try:
+                    from speech_utils import evaluate_voice_delivery
+                    st.session_state.last_voice_evaluation = (
+                        evaluate_voice_delivery(audio_file, answer)
+                    )
+                    st.session_state.last_voice_question = question
+                    for saved_answer in st.session_state.answer_results:
+                        if saved_answer.get("question") == question:
+                            saved_answer["voice_evaluation"] = (
+                                st.session_state.last_voice_evaluation
+                            )
+                except Exception as error:
+                    st.error(str(error))
+
+        if (
+            st.session_state.get("last_voice_question") == question
+            and "last_voice_evaluation" in st.session_state
+        ):
+            voice_result = st.session_state.last_voice_evaluation
+            st.markdown("### Recorded-voice delivery evaluation")
+            voice_columns = st.columns(3)
+            voice_columns[0].metric(
+                "Recording duration",
+                f'{voice_result.get("duration_seconds", 0)} sec'
+            )
+            voice_columns[1].metric(
+                "Speaking pace",
+                f'{voice_result.get("words_per_minute", 0)} words/min'
+            )
+            voice_columns[2].metric(
+                "Listed filler words",
+                voice_result.get("filler_count", 0)
+            )
+            st.write(
+                "**Pace observation:** "
+                + voice_result.get("pace_label", "Not available")
+            )
+            st.write(
+                "**Filler-word observation:** "
+                + voice_result.get("filler_label", "Not available")
+            )
+            for feedback_item in voice_result.get("feedback", []):
+                st.write("→ " + feedback_item)
+            st.caption(
+                "This delivery evaluation uses recording duration and the "
+                "corrected transcript. It does not infer accent quality, "
+                "emotion, confidence or nervousness. Filler detection covers "
+                "the listed English and Arabic markers only."
+            )
+
         if st.button("Ask the Answer Coach", type="primary", use_container_width=True):
             if not answer.strip():
                 st.warning("Type, record or upload an answer first.")
@@ -623,7 +729,18 @@ with practice_tab:
                             question, answer, st.session_state.cv_text,
                             st.session_state.job_description, api_key
                         )
-                    record = {"question": question, "answer": answer, "evaluation": result}
+                    voice_evaluation = {}
+                    if st.session_state.get("last_voice_question") == question:
+                        voice_evaluation = st.session_state.get(
+                            "last_voice_evaluation",
+                            {}
+                        )
+                    record = {
+                        "question": question,
+                        "answer": answer,
+                        "evaluation": result,
+                        "voice_evaluation": voice_evaluation
+                    }
                     st.session_state.answer_results = [
                         item for item in st.session_state.answer_results if item["question"] != question
                     ] + [record]
@@ -652,22 +769,381 @@ with practice_tab:
             st.info("Follow-up: " + result.get("follow_up_question", ""))
 
 with delivery_tab:
-    st.subheader("Optional visual delivery observations")
-    st.markdown('<div class="notice"><b>Important:</b> These models describe visible dataset-label outputs only. They cannot determine true emotion, nervousness, confidence, honesty, personality or job suitability. Visual results are excluded from the answer score.</div>', unsafe_allow_html=True)
+    st.subheader("Live and recorded visual delivery evaluation")
+    st.markdown('<div class="notice"><b>Important:</b> These models describe visible dataset-label outputs only. They cannot determine true emotion, nervousness, confidence, honesty, personality or job suitability. Visual results remain separate from the answer score.</div>', unsafe_allow_html=True)
     face_model_status = get_face_model_status()
-    if face_model_status["ready"]:
-        st.success("Facial-expression model files are available.")
-    else:
+    if not face_model_status["ready"]:
         st.warning(face_model_status["message"])
     confidence_model_status = get_confidence_model_status()
-    if confidence_model_status["ready"]:
-        st.success(confidence_model_status["message"])
-    else:
+    if not confidence_model_status["ready"]:
         st.warning(confidence_model_status["message"])
-    st.caption(
-        "The first analysis loads the models once. Later analyses reuse "
-        "them and process a small set of moments across the full video."
+
+    st.markdown("### Live camera")
+    st.write(
+        "Prepare the camera and microphone, then select START. The app records "
+        "video and voice together while periodically updating the YOLO person, "
+        "facial-expression, confidence-dataset and hand-gesture overlays."
     )
+
+    if not st.session_state.get("live_camera_prepared", False):
+        if st.button(
+            "Prepare live video and microphone",
+            use_container_width=True
+        ):
+            old_recording = st.session_state.get("live_recording_path", "")
+            old_audio = st.session_state.get("live_recording_audio_path", "")
+            for old_path in (old_recording, old_audio):
+                if old_path and os.path.exists(old_path):
+                    os.remove(old_path)
+
+            recording_id = uuid.uuid4().hex
+            st.session_state.live_recording_path = os.path.join(
+                tempfile.gettempdir(),
+                "candidate360_" + recording_id + ".flv"
+            )
+            st.session_state.live_recording_finalized = False
+            st.session_state.live_video_transcript = ""
+            st.session_state.pop("live_video_voice_evaluation", None)
+            st.session_state.pop("live_video_answer_evaluation", None)
+            st.session_state.live_camera_prepared = True
+
+    if st.session_state.get("live_camera_prepared", False):
+        try:
+            from aiortc.contrib.media import MediaRecorder
+            from streamlit_webrtc import WebRtcMode, webrtc_streamer
+            from vision_utils import LiveExpressionAnalyser
+
+            with st.spinner(
+                "Loading YOLO, the two face models and gesture recognition..."
+            ):
+                live_person_model = get_live_person_model()
+                live_expression_model = get_expression_model()
+                live_confidence_model = get_confidence_model()
+                live_gesture_recognizer = get_gesture_recognizer()
+
+            live_recording_path = st.session_state.live_recording_path
+
+            def live_recorder_factory():
+                return MediaRecorder(live_recording_path, format="flv")
+
+            live_context = webrtc_streamer(
+                key="candidate360_live_expression_camera",
+                mode=WebRtcMode.SENDRECV,
+                video_processor_factory=lambda: LiveExpressionAnalyser(
+                    live_person_model,
+                    live_expression_model,
+                    live_confidence_model,
+                    live_gesture_recognizer
+                ),
+                media_stream_constraints={
+                    "video": {
+                        "width": {"ideal": 640},
+                        "height": {"ideal": 480},
+                        "frameRate": {"ideal": 15, "max": 20}
+                    },
+                    "audio": {
+                        "echoCancellation": True,
+                        "noiseSuppression": True,
+                        "autoGainControl": True
+                    }
+                },
+                rtc_configuration={
+                    "iceServers": [
+                        {"urls": ["stun:stun.l.google.com:19302"]}
+                    ]
+                },
+                in_recorder_factory=live_recorder_factory,
+                async_processing=False
+            )
+
+            live_first, live_second = st.columns(2)
+            with live_first:
+                if st.button(
+                    "Create live-camera evaluation",
+                    use_container_width=True
+                ):
+                    live_processor = live_context.video_processor
+                    if live_processor is None:
+                        st.warning(
+                            "Start the camera and keep it running for a few "
+                            "seconds first."
+                        )
+                    else:
+                        live_result = live_processor.get_results()
+                        if live_result.get("analysed_frames", 0) == 0:
+                            st.warning(
+                                "Keep the camera running for a few seconds "
+                                "before creating the evaluation."
+                            )
+                        else:
+                            st.session_state.delivery_result = live_result
+                            st.success("Live-camera evaluation created.")
+            with live_second:
+                if st.button(
+                    "Reset live-camera observations",
+                    use_container_width=True
+                ):
+                    live_processor = live_context.video_processor
+                    if live_processor is None:
+                        st.warning(
+                            "Start the camera and keep it running for a few "
+                            "seconds first."
+                        )
+                    else:
+                        live_processor.reset()
+                        if st.session_state.get("delivery_result", {}).get(
+                            "source"
+                        ) == "live_camera":
+                            del st.session_state.delivery_result
+                        st.success("Live-camera observations reset.")
+
+            recording_ready = (
+                os.path.exists(live_recording_path)
+                and os.path.getsize(live_recording_path) > 1024
+                and not live_context.state.playing
+            )
+
+            if recording_ready:
+                stopped_processor = live_context.video_processor
+                if stopped_processor is not None:
+                    stopped_result = stopped_processor.get_results()
+                    if stopped_result.get("analysed_frames", 0) > 0:
+                        st.session_state.delivery_result = stopped_result
+
+                st.markdown("### Recorded video and voice feedback")
+                st.success(
+                    "The camera and microphone recording is ready. You can "
+                    "now analyse its voice separately from Interview Room."
+                )
+                st.video(live_recording_path)
+
+                if st.button(
+                    "Create transcript from recorded video",
+                    use_container_width=True
+                ):
+                    try:
+                        from speech_utils import (
+                            extract_audio_from_video,
+                            transcribe_audio_path
+                        )
+
+                        old_audio_path = st.session_state.get(
+                            "live_recording_audio_path",
+                            ""
+                        )
+                        if old_audio_path and os.path.exists(old_audio_path):
+                            os.remove(old_audio_path)
+
+                        with st.spinner(
+                            "Extracting the microphone audio and running "
+                            "Whisper transcription..."
+                        ):
+                            audio_path = extract_audio_from_video(
+                                live_recording_path
+                            )
+                            speech_model = get_speech_model()
+                            transcript = transcribe_audio_path(
+                                audio_path,
+                                speech_model
+                            )
+
+                        st.session_state.live_recording_audio_path = audio_path
+                        st.session_state.live_video_transcript = transcript
+                        st.session_state.live_video_corrected_transcript = (
+                            transcript
+                        )
+                        st.success(
+                            "Transcript created. Correct any mistakes before "
+                            "requesting feedback."
+                        )
+                    except Exception as error:
+                        st.error(str(error))
+
+                if "live_video_corrected_transcript" not in st.session_state:
+                    st.session_state.live_video_corrected_transcript = (
+                        st.session_state.get("live_video_transcript", "")
+                    )
+
+                corrected_live_transcript = st.text_area(
+                    "Recorded-video answer / corrected transcript",
+                    key="live_video_corrected_transcript",
+                    height=190,
+                    help=(
+                        "Correct names, technical terms and transcription "
+                        "mistakes before evaluating the recording."
+                    )
+                )
+
+                live_voice_first, live_voice_second = st.columns(2)
+                with live_voice_first:
+                    if st.button(
+                        "Evaluate recorded-video voice delivery",
+                        use_container_width=True
+                    ):
+                        try:
+                            from speech_utils import (
+                                evaluate_voice_delivery_path,
+                                extract_audio_from_video
+                            )
+
+                            audio_path = st.session_state.get(
+                                "live_recording_audio_path",
+                                ""
+                            )
+                            if not audio_path or not os.path.exists(audio_path):
+                                audio_path = extract_audio_from_video(
+                                    live_recording_path
+                                )
+                                st.session_state.live_recording_audio_path = (
+                                    audio_path
+                                )
+
+                            st.session_state.live_video_voice_evaluation = (
+                                evaluate_voice_delivery_path(
+                                    audio_path,
+                                    corrected_live_transcript
+                                )
+                            )
+                        except Exception as error:
+                            st.error(str(error))
+
+                with live_voice_second:
+                    if st.button(
+                        "Ask the Answer Coach about this video answer",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        questions = st.session_state.get("questions", [])
+                        if not questions:
+                            st.warning(
+                                "Complete Role Lab first so the video answer "
+                                "can be evaluated against an interview question."
+                            )
+                        elif not corrected_live_transcript.strip():
+                            st.warning(
+                                "Create and check the recorded-video transcript "
+                                "first."
+                            )
+                        else:
+                            try:
+                                question_index = min(
+                                    st.session_state.get("question_index", 0),
+                                    len(questions) - 1
+                                )
+                                video_question = questions[question_index].get(
+                                    "question",
+                                    ""
+                                )
+                                with st.spinner(
+                                    "The Answer Coach is reviewing the "
+                                    "recorded-video answer..."
+                                ):
+                                    video_evaluation = evaluate_answer(
+                                        video_question,
+                                        corrected_live_transcript,
+                                        st.session_state.cv_text,
+                                        st.session_state.job_description,
+                                        api_key
+                                    )
+
+                                st.session_state.live_video_answer_evaluation = (
+                                    video_evaluation
+                                )
+                                voice_evaluation = st.session_state.get(
+                                    "live_video_voice_evaluation",
+                                    {}
+                                )
+                                record = {
+                                    "question": video_question,
+                                    "answer": corrected_live_transcript,
+                                    "evaluation": video_evaluation,
+                                    "voice_evaluation": voice_evaluation
+                                }
+                                st.session_state.answer_results = [
+                                    item
+                                    for item in st.session_state.answer_results
+                                    if item["question"] != video_question
+                                ] + [record]
+                            except Exception as error:
+                                st.error(str(error))
+
+                live_voice_result = st.session_state.get(
+                    "live_video_voice_evaluation",
+                    {}
+                )
+                if live_voice_result:
+                    st.markdown("#### Recorded-video voice delivery")
+                    live_voice_columns = st.columns(3)
+                    live_voice_columns[0].metric(
+                        "Recording duration",
+                        f'{live_voice_result.get("duration_seconds", 0)} sec'
+                    )
+                    live_voice_columns[1].metric(
+                        "Speaking pace",
+                        f'{live_voice_result.get("words_per_minute", 0)} words/min'
+                    )
+                    live_voice_columns[2].metric(
+                        "Listed filler words",
+                        live_voice_result.get("filler_count", 0)
+                    )
+                    st.write(
+                        "**Pace observation:** "
+                        + live_voice_result.get("pace_label", "Not available")
+                    )
+                    st.write(
+                        "**Filler-word observation:** "
+                        + live_voice_result.get("filler_label", "Not available")
+                    )
+                    for feedback_item in live_voice_result.get("feedback", []):
+                        st.write("→ " + feedback_item)
+
+                live_answer_result = st.session_state.get(
+                    "live_video_answer_evaluation",
+                    {}
+                )
+                if live_answer_result:
+                    st.markdown("#### Recorded-video Answer Coach")
+                    answer_columns = st.columns(5)
+                    for column, label, key in zip(
+                        answer_columns,
+                        [
+                            "Relevance",
+                            "Specificity",
+                            "Structure",
+                            "Role fit",
+                            "Overall"
+                        ],
+                        [
+                            "relevance",
+                            "specificity",
+                            "structure",
+                            "job_alignment",
+                            "overall"
+                        ]
+                    ):
+                        column.metric(
+                            label,
+                            f'{live_answer_result.get(key, 0)}%'
+                        )
+                    for value in live_answer_result.get("strengths", []):
+                        st.write("✓ " + value)
+                    for value in live_answer_result.get("improvements", []):
+                        st.write("→ " + value)
+        except ImportError as error:
+            st.session_state.live_camera_prepared = False
+            st.error(
+                "Live camera is unavailable. Add streamlit-webrtc to "
+                "requirements.txt and reboot the app. Details: " + str(error)
+            )
+        except Exception as error:
+            st.session_state.live_camera_prepared = False
+            st.error(
+                "The live camera could not start. Reboot the app, allow camera "
+                "permission and try again. Details: " + str(error)
+            )
+
+    st.divider()
+    st.markdown("### Uploaded image or recorded video")
     media_file = st.file_uploader("Upload an interview image or video", type=["jpg", "jpeg", "png", "mp4", "mov", "avi"], key="delivery_media")
     if media_file is not None:
         if media_file.type.startswith("video"):
@@ -729,7 +1205,28 @@ with delivery_tab:
         st.markdown("### Observation summary")
         expressions = result.get("expressions", [])
 
-        if "analysed_frames" in result:
+        if result.get("source") == "live_camera":
+            first, second, third, fourth = st.columns(4)
+            first.metric(
+                "YOLO person visible",
+                f'{result.get("person_visibility", 0)}%'
+            )
+            second.metric(
+                "Face visible",
+                f'{result.get("face_visibility", 0)}%'
+            )
+            third.metric(
+                "Most frequent expression output",
+                result.get("main_expression", "Not available").title()
+            )
+            fourth.metric(
+                "Most frequent confidence-dataset output",
+                result.get(
+                    "main_confidence_output",
+                    "Not available"
+                ).title()
+            )
+        elif "analysed_frames" in result:
             first, second = st.columns(2)
             first.metric("Person visible", f'{result.get("person_visibility", 0)}%')
             second.metric(
@@ -747,7 +1244,13 @@ with delivery_tab:
             second.metric("Top expression output", main_expression)
 
         if expressions:
-            if "analysed_frames" in result:
+            if result.get("source") == "live_camera":
+                st.markdown("#### Live facial-expression distribution")
+                st.caption(
+                    "Percentage of classified live-camera samples in which "
+                    "each label was the model's top output."
+                )
+            elif "analysed_frames" in result:
                 st.markdown("#### Facial-expression distribution")
                 st.caption(
                     "Percentage of successfully classified sampled video "
@@ -771,10 +1274,18 @@ with delivery_tab:
             else:
                 st.info("Expression output is unavailable. Add face_expression_model.keras and class_names.json to the models folder.")
 
+        if result.get("evaluation_feedback"):
+            st.info(result["evaluation_feedback"])
+
         confidence_outputs = result.get("confidence_outputs", [])
         if confidence_outputs:
             st.markdown("#### Confidence-dataset label distribution")
-            if "analysed_frames" in result:
+            if result.get("source") == "live_camera":
+                st.caption(
+                    "Percentage of classified live-camera samples assigned "
+                    "to each confidence-dataset label."
+                )
+            elif "analysed_frames" in result:
                 st.caption(
                     "Percentage of successfully classified face-cropped "
                     "video moments assigned to each dataset label."
@@ -806,6 +1317,26 @@ with delivery_tab:
             "the source dataset. They are not verified measurements of "
             "confidence or nervousness and are never used in answer scores."
         )
+
+        gestures = result.get("gestures", [])
+        if gestures:
+            st.markdown("#### Hand-gesture distribution")
+            st.caption(
+                "Percentage of sampled moments containing a detected hand "
+                "that were assigned to each supported gesture label."
+            )
+            for item in gestures:
+                score = round(item.get("score", 0) * 100, 1)
+                st.write(
+                    f'{item.get("label", "Unknown").title()}: {score}%'
+                )
+                st.progress(min(max(item.get("score", 0), 0), 1))
+        elif result.get("source") == "live_camera":
+            gesture_error = result.get("gesture_error", "")
+            if gesture_error:
+                st.error("Hand-gesture model error: " + gesture_error)
+            else:
+                st.info("No supported hand gesture was detected.")
 
 with summary_tab:
     st.subheader("Turn practice into a plan")

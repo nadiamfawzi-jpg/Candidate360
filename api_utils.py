@@ -198,7 +198,9 @@ Return JSON only:
   "next_practice_plan": ["step 1", "step 2", "step 3"]
 }}
 Do not make a hiring recommendation. Do not use visual or voice-expression
-predictions as evidence of competence, confidence or personality.
+predictions as evidence of competence, confidence or personality. Recorded-
+voice pace and listed filler-word observations may be mentioned only as
+delivery-practice suggestions; they must not change the answer scores.
 """
     system_message = "You are the final interview practice coach. Summarise evidence without exaggeration."
     return get_json_response(prompt, system_message, api_key)

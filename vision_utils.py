@@ -4,7 +4,6 @@ import os
 import tempfile
 import threading
 import time
-import urllib.request
 from functools import lru_cache
 
 import cv2
@@ -22,11 +21,6 @@ CONFIDENCE_CLASS_NAMES_PATH = os.path.join(
     MODEL_DIR,
     "confidence_class_names.json"
 )
-GESTURE_MODEL_PATH = os.path.join(MODEL_DIR, "gesture_recognizer.task")
-GESTURE_MODEL_URL = (
-    "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/"
-    "gesture_recognizer/float16/latest/gesture_recognizer.task"
-)
 
 IMAGE_SIZE = (128, 128)
 POSE_IMAGE_SIZE = 320
@@ -42,47 +36,6 @@ FACE_CASCADE_PATH = os.path.join(
 def load_pose_model():
     from ultralytics import YOLO
     return YOLO("yolo26n-pose.pt")
-
-
-def load_live_person_model():
-    from ultralytics import YOLO
-    return YOLO("yolo26n.pt")
-
-
-def ensure_gesture_model():
-    if os.path.exists(GESTURE_MODEL_PATH):
-        return GESTURE_MODEL_PATH
-
-    os.makedirs(MODEL_DIR, exist_ok=True)
-    temporary_path = GESTURE_MODEL_PATH + ".download"
-    try:
-        urllib.request.urlretrieve(GESTURE_MODEL_URL, temporary_path)
-        os.replace(temporary_path, GESTURE_MODEL_PATH)
-    except Exception as error:
-        raise RuntimeError(
-            "The hand-gesture model could not be downloaded. Add "
-            "models/gesture_recognizer.task to the project manually or "
-            "check network access."
-        ) from error
-    finally:
-        if os.path.exists(temporary_path):
-            os.remove(temporary_path)
-    return GESTURE_MODEL_PATH
-
-
-def load_gesture_recognizer():
-    import mediapipe as mp
-
-    model_path = ensure_gesture_model()
-    options = mp.tasks.vision.GestureRecognizerOptions(
-        base_options=mp.tasks.BaseOptions(model_asset_path=model_path),
-        running_mode=mp.tasks.vision.RunningMode.IMAGE,
-        num_hands=1,
-        min_hand_detection_confidence=0.5,
-        min_hand_presence_confidence=0.5,
-        min_tracking_confidence=0.5
-    )
-    return mp.tasks.vision.GestureRecognizer.create_from_options(options)
 
 
 def _get_model_status(model_path, class_path, display_name):
@@ -265,21 +218,17 @@ def _summarise_prediction_batch(prediction_batch):
 
 
 class LiveExpressionAnalyser:
-    """Create tutor-style live observations without building a frame queue."""
+    """Sample two face classifiers while keeping the camera responsive."""
 
     def __init__(
         self,
-        person_model,
         expression_model_data,
         confidence_model_data,
-        gesture_recognizer,
-        sample_interval=2.0,
+        sample_interval=1.5,
         analysis_width=480
     ):
-        self.person_model = person_model
         self.expression_model_data = expression_model_data
         self.confidence_model_data = confidence_model_data
-        self.gesture_recognizer = gesture_recognizer
         self.sample_interval = sample_interval
         self.analysis_width = analysis_width
         self.lock = threading.Lock()
@@ -288,21 +237,13 @@ class LiveExpressionAnalyser:
     def reset(self):
         with getattr(self, "lock", threading.Lock()):
             self.total_samples = 0
-            self.person_samples = 0
             self.face_samples = 0
             self.expression_counts = {}
             self.confidence_counts = {}
-            self.gesture_counts = {}
-            self.latest_person = "Not detected"
-            self.latest_person_score = 0.0
             self.latest_expression = ""
             self.latest_confidence = ""
-            self.latest_gesture = "No hand detected"
-            self.latest_person_box = None
-            self.person_error = ""
             self.expression_error = ""
             self.confidence_error = ""
-            self.gesture_error = ""
             self.last_sample_time = 0.0
             self.analysis_running = False
 
@@ -329,87 +270,8 @@ class LiveExpressionAnalyser:
             label_counts[top_label] = label_counts.get(top_label, 0) + 1
             setattr(self, latest_name, top_label)
 
-    def _analyse_person(self, analysis_frame):
-        if self.person_model is None:
-            return
-
-        try:
-            results = self.person_model.predict(
-                analysis_frame,
-                imgsz=320,
-                classes=[0],
-                conf=0.35,
-                max_det=1,
-                verbose=False
-            )
-            result = results[0]
-            boxes = result.boxes
-            person_detected = boxes is not None and len(boxes) > 0
-
-            person_box = None
-            person_score = 0.0
-            if person_detected:
-                coordinates = boxes.xyxy[0].cpu().numpy().tolist()
-                if getattr(boxes, "conf", None) is not None:
-                    person_score = float(boxes.conf[0].cpu().item())
-                height, width = analysis_frame.shape[:2]
-                person_box = (
-                    coordinates[0] / width,
-                    coordinates[1] / height,
-                    coordinates[2] / width,
-                    coordinates[3] / height
-                )
-
-            with self.lock:
-                self.latest_person = (
-                    "Detected" if person_detected else "Not detected"
-                )
-                self.latest_person_score = person_score
-                self.latest_person_box = person_box
-                if person_detected:
-                    self.person_samples += 1
-        except Exception as error:
-            with self.lock:
-                self.person_error = str(error)
-
-    def _analyse_gesture(self, analysis_frame):
-        if self.gesture_recognizer is None:
-            return
-
-        try:
-            import mediapipe as mp
-
-            rgb_frame = cv2.cvtColor(analysis_frame, cv2.COLOR_BGR2RGB)
-            mp_image = mp.Image(
-                image_format=mp.ImageFormat.SRGB,
-                data=np.ascontiguousarray(rgb_frame)
-            )
-            result = self.gesture_recognizer.recognize(mp_image)
-
-            hand_detected = bool(result.hand_landmarks)
-            gesture_label = "No hand detected"
-            if hand_detected:
-                gesture_label = "Unrecognized hand gesture"
-                if result.gestures and result.gestures[0]:
-                    category = result.gestures[0][0]
-                    category_name = category.category_name or ""
-                    if category_name and category_name != "None":
-                        gesture_label = category_name.replace("_", " ")
-
-            with self.lock:
-                self.latest_gesture = gesture_label
-                if hand_detected:
-                    self.gesture_counts[gesture_label] = (
-                        self.gesture_counts.get(gesture_label, 0) + 1
-                    )
-        except Exception as error:
-            with self.lock:
-                self.gesture_error = str(error)
-
     def _analyse_sample(self, image):
         analysis_frame = self._prepare_analysis_frame(image)
-        self._analyse_person(analysis_frame)
-        self._analyse_gesture(analysis_frame)
         face_crop = extract_largest_face(
             analysis_frame,
             load_face_detector()
@@ -485,84 +347,34 @@ class LiveExpressionAnalyser:
                     self.analysis_running = False
 
         with self.lock:
-            latest_person = self.latest_person
-            latest_person_score = self.latest_person_score
             latest_expression = self.latest_expression
             latest_confidence = self.latest_confidence
-            latest_gesture = self.latest_gesture
-            latest_person_box = self.latest_person_box
 
-        image_height, image_width = image.shape[:2]
-        if latest_person_box:
-            x1 = int(latest_person_box[0] * image_width)
-            y1 = int(latest_person_box[1] * image_height)
-            x2 = int(latest_person_box[2] * image_width)
-            y2 = int(latest_person_box[3] * image_height)
-            cv2.rectangle(image, (x1, y1), (x2, y2), (60, 110, 255), 2)
+        if latest_expression:
+            display_text = "Expression: " + latest_expression.title()
             cv2.putText(
                 image,
-                "person " + f"{latest_person_score:.2f}",
-                (x1, max(y1 - 8, 18)),
+                display_text,
+                (18, 34),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.62,
-                (60, 110, 255),
+                0.75,
+                (40, 220, 170),
                 2,
                 cv2.LINE_AA
             )
 
-        overlay_height = min(112, image_height)
-        overlay = image.copy()
-        cv2.rectangle(
-            overlay,
-            (0, 0),
-            (image_width, overlay_height),
-            (18, 28, 39),
-            -1
-        )
-        cv2.addWeighted(overlay, 0.82, image, 0.18, 0, image)
-
-        expression_text = (
-            latest_expression.title() if latest_expression else "Waiting"
-        )
-        confidence_text = (
-            latest_confidence.title() if latest_confidence else "Waiting"
-        )
-        gesture_text = latest_gesture or "No hand detected"
-
-        person_status_text = "YOLO person: " + latest_person
-        if latest_person == "Detected":
-            person_status_text += " " + f"({latest_person_score:.0%})"
-
-        cv2.putText(
-            image,
-            person_status_text,
-            (16, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.68,
-            (50, 230, 255),
-            2,
-            cv2.LINE_AA
-        )
-        cv2.putText(
-            image,
-            "Expression: " + expression_text + " / " + confidence_text,
-            (16, 64),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.63,
-            (245, 245, 245),
-            2,
-            cv2.LINE_AA
-        )
-        cv2.putText(
-            image,
-            "Gesture: " + gesture_text.title(),
-            (16, 98),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.63,
-            (120, 240, 150),
-            2,
-            cv2.LINE_AA
-        )
+        if latest_confidence:
+            display_text = "Dataset label: " + latest_confidence.title()
+            cv2.putText(
+                image,
+                display_text,
+                (18, 66),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.68,
+                (90, 190, 255),
+                2,
+                cv2.LINE_AA
+            )
 
         return av.VideoFrame.from_ndarray(image, format="bgr24")
 
@@ -573,15 +385,11 @@ class LiveExpressionAnalyser:
     def get_results(self):
         with self.lock:
             total_samples = self.total_samples
-            person_samples = self.person_samples
             face_samples = self.face_samples
             expression_counts = dict(self.expression_counts)
             confidence_counts = dict(self.confidence_counts)
-            gesture_counts = dict(self.gesture_counts)
-            person_error = self.person_error
             expression_error = self.expression_error
             confidence_error = self.confidence_error
-            gesture_error = self.gesture_error
 
         def create_distribution(label_counts):
             classified_samples = sum(label_counts.values())
@@ -603,11 +411,6 @@ class LiveExpressionAnalyser:
 
         expressions = create_distribution(expression_counts)
         confidence_outputs = create_distribution(confidence_counts)
-        gestures = create_distribution(gesture_counts)
-
-        person_visibility = round(
-            person_samples / total_samples * 100
-        ) if total_samples else 0
 
         face_visibility = round(
             face_samples / total_samples * 100
@@ -633,8 +436,6 @@ class LiveExpressionAnalyser:
         return {
             "source": "live_camera",
             "analysed_frames": total_samples,
-            "person_visibility": person_visibility,
-            "person_error": person_error,
             "face_visibility": face_visibility,
             "face_error": "" if face_samples else (
                 "No clear frontal face was detected during the live session."
@@ -651,27 +452,8 @@ class LiveExpressionAnalyser:
             ),
             "confidence_outputs": confidence_outputs,
             "confidence_error": confidence_error,
-            "main_gesture": (
-                gestures[0]["label"] if gestures else "No hand detected"
-            ),
-            "gestures": gestures,
-            "gesture_error": gesture_error,
             "evaluation_feedback": evaluation_feedback,
         }
-
-    def release_models(self):
-        """Release per-camera references before loading the speech model."""
-        with self.lock:
-            gesture_recognizer = self.gesture_recognizer
-            self.person_model = None
-            self.expression_model_data = (None, [])
-            self.confidence_model_data = (None, [])
-            self.gesture_recognizer = None
-
-        if gesture_recognizer is not None:
-            close_method = getattr(gesture_recognizer, "close", None)
-            if callable(close_method):
-                close_method()
 
 
 def _read_video_samples(

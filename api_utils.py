@@ -41,46 +41,19 @@ def get_llm_response(prompt, system_message, api_key=""):
     return response
 
 
-def get_json_response(prompt, system_message, api_key="", max_attempts=2):
-    last_error = None
-    current_prompt = prompt
+def get_json_response(prompt, system_message, api_key=""):
+    response = get_llm_response(prompt, system_message, api_key)
+    clean_response = response.strip()
 
-    for attempt in range(max_attempts):
-        response = get_llm_response(current_prompt, system_message, api_key)
-        clean_response = response.strip()
+    if clean_response.startswith("```"):
+        clean_response = clean_response.replace("```json", "").replace("```", "").strip()
 
-        if clean_response.startswith("```"):
-            clean_response = clean_response.replace("```json", "").replace("```", "").strip()
+    start = clean_response.find("{")
+    end = clean_response.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("The API did not return the expected JSON. Please try again.")
 
-        start = clean_response.find("{")
-        end = clean_response.rfind("}")
-        if start != -1 and end != -1:
-            try:
-                return json.loads(clean_response[start:end + 1])
-            except json.JSONDecodeError as error:
-                last_error = error
-        else:
-            last_error = ValueError("No JSON object was found in the response.")
-
-        current_prompt = (
-            prompt
-            + "\n\nYour previous reply was not valid JSON. Return the JSON "
-            "object only. No commentary, no markdown fences, no text "
-            "before or after the object."
-        )
-
-    raise ValueError(
-        "The API did not return the expected JSON. Please try again."
-    ) from last_error
-
-
-def _clamp_score(value, default=0):
-    """Coerce a model-reported score to an integer between 0 and 100."""
-    try:
-        score = int(round(float(value)))
-    except (TypeError, ValueError):
-        return default
-    return max(0, min(100, score))
+    return json.loads(clean_response[start:end + 1])
 
 
 def build_interview(cv_text, job_description, target_role, api_key=""):
@@ -124,10 +97,8 @@ personal characteristics.
         "Do not invent evidence. Return valid JSON only."
     )
     result = get_json_response(prompt, system_message, api_key)
-    cv_analysis = result.get("cv_analysis", {})
-    cv_analysis["match_score"] = _clamp_score(cv_analysis.get("match_score", 0))
     return {
-        "cv_analysis": cv_analysis,
+        "cv_analysis": result.get("cv_analysis", {}),
         "questions": result.get("questions", [])
     }
 
@@ -156,9 +127,7 @@ Use only evidence present in the supplied text. Do not infer age, gender,
 race, health, religion, personality or other protected information.
 """
     system_message = "You are a careful CV analyst supporting interview practice. Do not invent evidence."
-    result = get_json_response(prompt, system_message, api_key)
-    result["match_score"] = _clamp_score(result.get("match_score", 0))
-    return result
+    return get_json_response(prompt, system_message, api_key)
 
 
 def create_questions(cv_text, job_description, target_role, api_key=""):
@@ -211,10 +180,7 @@ Return JSON only:
 All five scores must be integers from 0 to 100.
 """
     system_message = "You are an evidence-based interview answer coach. Be supportive, specific and honest."
-    result = get_json_response(prompt, system_message, api_key)
-    for score_key in ("relevance", "specificity", "structure", "job_alignment", "overall"):
-        result[score_key] = _clamp_score(result.get(score_key, 0))
-    return result
+    return get_json_response(prompt, system_message, api_key)
 
 
 def create_session_summary(target_role, cv_analysis, answer_results, api_key=""):

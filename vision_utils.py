@@ -58,6 +58,12 @@ def ensure_gesture_model():
     try:
         urllib.request.urlretrieve(GESTURE_MODEL_URL, temporary_path)
         os.replace(temporary_path, GESTURE_MODEL_PATH)
+    except Exception as error:
+        raise RuntimeError(
+            "The hand-gesture model could not be downloaded. Add "
+            "models/gesture_recognizer.task to the project manually or "
+            "check network access."
+        ) from error
     finally:
         if os.path.exists(temporary_path):
             os.remove(temporary_path)

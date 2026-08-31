@@ -39,6 +39,23 @@ def read_docx(uploaded_file):
     for paragraph in document.paragraphs:
         text += paragraph.text + "\n"
 
+    # Some CV templates put the skills or contact-details section in a
+    # table rather than plain paragraphs. Without this, that content is
+    # silently missing from the CV Analyst's input.
+    for table in document.tables:
+        for row in table.rows:
+            row_cells = []
+            previous_cell_text = None
+            for cell in row.cells:
+                cell_text = cell.text.strip()
+                # Merged cells repeat the same text for every column they
+                # span, so skip immediate repeats rather than doubling them.
+                if cell_text and cell_text != previous_cell_text:
+                    row_cells.append(cell_text)
+                previous_cell_text = cell_text
+            if row_cells:
+                text += " | ".join(row_cells) + "\n"
+
     return text
 
 

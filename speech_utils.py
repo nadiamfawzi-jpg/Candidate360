@@ -1,5 +1,6 @@
 import os
 import re
+import subprocess
 import tempfile
 
 from mutagen import File as MutagenFile
@@ -26,16 +27,68 @@ def transcribe_audio(uploaded_audio, speech_model):
     audio_path = save_audio(uploaded_audio)
 
     try:
-        transcript = speech_model(
-            audio_path,
-            chunk_length_s=30,
-            stride_length_s=5,
-            generate_kwargs={"task": "transcribe"}
-        )
-        return transcript.get("text", "").strip()
+        return transcribe_audio_path(audio_path, speech_model)
     finally:
         if os.path.exists(audio_path):
             os.remove(audio_path)
+
+
+def transcribe_audio_path(audio_path, speech_model):
+    transcript = speech_model(
+        audio_path,
+        chunk_length_s=30,
+        stride_length_s=5,
+        generate_kwargs={"task": "transcribe"}
+    )
+    return transcript.get("text", "").strip()
+
+
+def extract_audio_from_video(video_path):
+    """Create a 16 kHz mono WAV file from a WebRTC video recording."""
+    with tempfile.NamedTemporaryFile(
+        delete=False, prefix="candidate360_", suffix=".wav"
+    ) as audio_file:
+        audio_path = audio_file.name
+
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        video_path,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        audio_path
+    ]
+
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+    except FileNotFoundError as error:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        raise RuntimeError(
+            "FFmpeg is required to read audio from the recorded video."
+        ) from error
+    except subprocess.CalledProcessError as error:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        details = (error.stderr or "").strip().splitlines()
+        message = details[-1] if details else "Unknown FFmpeg error"
+        raise RuntimeError(
+            "The recorded video audio could not be extracted: " + message
+        ) from error
+
+    return audio_path
 
 
 def get_audio_duration(uploaded_audio):
@@ -59,13 +112,39 @@ def get_audio_duration(uploaded_audio):
             os.remove(audio_path)
 
 
+def get_audio_duration_path(audio_path):
+    audio_information = MutagenFile(audio_path)
+    if audio_information is None or audio_information.info is None:
+        raise ValueError("The recorded-video audio duration could not be read.")
+
+    duration_seconds = float(audio_information.info.length)
+    if duration_seconds <= 0:
+        raise ValueError("The recording does not contain readable audio.")
+    return duration_seconds
+
+
 def evaluate_voice_delivery(uploaded_audio, corrected_transcript):
     """Return simple delivery observations from duration and transcript text."""
+    duration_seconds = get_audio_duration(uploaded_audio)
+    return evaluate_voice_delivery_values(
+        duration_seconds,
+        corrected_transcript
+    )
+
+
+def evaluate_voice_delivery_path(audio_path, corrected_transcript):
+    duration_seconds = get_audio_duration_path(audio_path)
+    return evaluate_voice_delivery_values(
+        duration_seconds,
+        corrected_transcript
+    )
+
+
+def evaluate_voice_delivery_values(duration_seconds, corrected_transcript):
     transcript = corrected_transcript.strip()
     if not transcript:
         raise ValueError("Create and check the transcript before evaluating delivery.")
 
-    duration_seconds = get_audio_duration(uploaded_audio)
     words = re.findall(r"\b[\w'-]+\b", transcript, flags=re.UNICODE)
     word_count = len(words)
     words_per_minute = round(word_count / duration_seconds * 60)
@@ -74,8 +153,6 @@ def evaluate_voice_delivery(uploaded_audio, corrected_transcript):
         "um": r"\b(?:um+|umm+)\b",
         "uh": r"\b(?:uh+|uhh+)\b",
         "you know": r"\byou\s+know\b",
-        "basically": r"\bbasically\b",
-        "actually": r"\bactually\b",
         "يعني": r"\bيعني\b",
         "امم": r"\b(?:ام+|أم+)\b",
     }

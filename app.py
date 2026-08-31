@@ -520,6 +520,41 @@ try:
 except Exception:
     api_key = ""
 
+
+def get_ice_servers():
+    """Build the WebRTC ICE server list.
+
+    STUN alone lets two peers connect directly, but it fails silently for
+    users behind a restrictive NAT or firewall (common on corporate
+    networks and some mobile carriers) - the camera preview just never
+    starts, with no clear error. A TURN relay is the fallback path for
+    those users. If TURN_ICE_SERVERS is set in Streamlit Secrets (paste
+    the JSON array your TURN provider's dashboard gives you, e.g. the
+    "Show ICE Servers Array" output), it is added after the public STUN
+    server. Without it, the app falls back to STUN-only exactly as before.
+    """
+    ice_servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+
+    try:
+        turn_servers_raw = st.secrets["TURN_ICE_SERVERS"]
+    except Exception:
+        return ice_servers
+
+    try:
+        turn_servers = (
+            json.loads(turn_servers_raw)
+            if isinstance(turn_servers_raw, str)
+            else turn_servers_raw
+        )
+    except (TypeError, ValueError):
+        return ice_servers
+
+    if isinstance(turn_servers, list):
+        ice_servers.extend(turn_servers)
+
+    return ice_servers
+
+
 with st.sidebar:
     st.title("✦ Studio controls")
     st.markdown("**Set the role before building your interview.**")
@@ -848,9 +883,7 @@ with delivery_tab:
                     }
                 },
                 rtc_configuration={
-                    "iceServers": [
-                        {"urls": ["stun:stun.l.google.com:19302"]}
-                    ]
+                    "iceServers": get_ice_servers()
                 },
                 in_recorder_factory=live_recorder_factory,
                 async_processing=False

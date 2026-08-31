@@ -879,3 +879,4 @@ def analyse_video(
         "confidence_outputs": confidence_outputs,
         "confidence_error": confidence_error
     }
+

@@ -14,3 +14,5 @@ soundfile
 mutagen==1.48.1
 ultralytics
 opencv-python-headless
+mediapipe==0.10.21
+

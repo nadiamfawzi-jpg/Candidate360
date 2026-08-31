@@ -8,9 +8,11 @@ from transformers import pipeline
 
 
 def load_speech_model():
+    model_name = os.getenv("WHISPER_MODEL", "openai/whisper-tiny")
     speech_model = pipeline(
         "automatic-speech-recognition",
-        model="openai/whisper-small"
+        model=model_name,
+        device=-1
     )
     return speech_model
 
@@ -34,13 +36,25 @@ def transcribe_audio(uploaded_audio, speech_model):
 
 
 def transcribe_audio_path(audio_path, speech_model):
+    if not os.path.exists(audio_path) or os.path.getsize(audio_path) <= 44:
+        raise ValueError(
+            "The recording does not contain usable microphone audio. Allow "
+            "microphone access, select the correct microphone and record again."
+        )
+
     transcript = speech_model(
         audio_path,
         chunk_length_s=30,
         stride_length_s=5,
         generate_kwargs={"task": "transcribe"}
     )
-    return transcript.get("text", "").strip()
+    transcript_text = transcript.get("text", "").strip()
+    if not transcript_text:
+        raise ValueError(
+            "Whisper did not detect clear speech in the recording. Check the "
+            "microphone selection and volume, then record again."
+        )
+    return transcript_text
 
 
 def extract_audio_from_video(video_path):
@@ -85,8 +99,18 @@ def extract_audio_from_video(video_path):
         details = (error.stderr or "").strip().splitlines()
         message = details[-1] if details else "Unknown FFmpeg error"
         raise RuntimeError(
-            "The recorded video audio could not be extracted: " + message
+            "No usable microphone track was found in the recorded video. "
+            "Allow microphone access, select the correct microphone in the "
+            "camera panel and record again. Technical detail: " + message
         ) from error
+
+    if not os.path.exists(audio_path) or os.path.getsize(audio_path) <= 44:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        raise RuntimeError(
+            "The video was saved without usable microphone audio. Allow "
+            "microphone access and select the correct microphone before START."
+        )
 
     return audio_path
 

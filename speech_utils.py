@@ -45,7 +45,9 @@ def transcribe_audio_path(audio_path, speech_model):
 
 def extract_audio_from_video(video_path):
     """Create a 16 kHz mono WAV file from a WebRTC video recording."""
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as audio_file:
+    with tempfile.NamedTemporaryFile(
+        delete=False, prefix="candidate360_", suffix=".wav"
+    ) as audio_file:
         audio_path = audio_file.name
 
     command = [
@@ -151,8 +153,6 @@ def evaluate_voice_delivery_values(duration_seconds, corrected_transcript):
         "um": r"\b(?:um+|umm+)\b",
         "uh": r"\b(?:uh+|uhh+)\b",
         "you know": r"\byou\s+know\b",
-        "basically": r"\bbasically\b",
-        "actually": r"\bactually\b",
         "يعني": r"\bيعني\b",
         "امم": r"\b(?:ام+|أم+)\b",
     }

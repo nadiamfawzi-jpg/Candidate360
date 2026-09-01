@@ -241,3 +241,4 @@ def evaluate_voice_delivery_values(duration_seconds, corrected_transcript):
         "filler_details": filler_details,
         "feedback": feedback,
     }
+

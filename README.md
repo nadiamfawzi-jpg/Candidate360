@@ -1,33 +1,41 @@
-# Candidate360
+# 🎯 Candidate360
 
 Candidate360 is an AI-powered interview-practice application that adapts each session to the candidate’s CV, selected role and job description. It combines tailored questions with answer coaching, multilingual speech transcription and separate visual-delivery observations.
 
-**Live app:** [Candidate360 on Streamlit](https://candidate360-c7jluz3jvtx39hw5pcunvv.streamlit.app/)
+🌐 **Live app:** [Candidate360 on Streamlit](https://candidate360-c7jluz3jvtx39hw5pcunvv.streamlit.app/)
 
-## The problem
+## 💡 The problem
 
 Many interview-practice tools provide generic questions and feedback. They may not consider the candidate’s experience, the requirements of the target job or how the answer is delivered.
 
-## The solution
+## 🚀 The solution
 
 Candidate360 connects these areas in one practice workflow:
 
-1. **Role Lab** reads the CV and job description, checks role alignment and creates tailored interview questions.
-2. **Interview Room** accepts a typed answer, microphone recording or uploaded audio file.
-3. **Delivery Lab** processes a recorded or uploaded interview video through separate visual and speech routes.
-4. **Debrief** summarises strengths, improvements and suggested next-practice actions.
+1. 📄 **Role Lab** reads the CV and job description, checks role alignment and creates tailored interview questions.
+2. 🎙️ **Interview Room** accepts a typed answer, microphone recording or uploaded audio file.
+3. 🎥 **Delivery Lab** processes a recorded or uploaded interview video through separate visual and speech routes.
+4. 📊 **Debrief** summarises strengths, improvements and suggested next-practice actions.
 
-## Main features
+## ✨ Main features
+
+### 📄 Role and CV preparation
 
 - Upload CV files in PDF, DOCX or TXT format.
 - Paste a real job description and select or enter a target role or major.
 - Display a role/job match, partial-match or mismatch notice.
 - Generate six role-aware interview questions through a language model.
+
+### 🎙️ Answer and speech coaching
+
 - Answer by text, microphone recording or desktop audio upload.
 - Accept WAV, MP3, M4A and FLAC audio recordings.
 - Create an editable multilingual transcript before answer evaluation.
 - Evaluate relevance, specificity, structure and job alignment.
 - Provide strengths, improvements, a stronger example and a follow-up question.
+
+### 🎥 Video and visual observations
+
 - Record or upload interview videos in common formats.
 - Extract and transcribe speech from an uploaded video.
 - Report speaking duration, words per minute and listed filler words.
@@ -35,15 +43,18 @@ Candidate360 connects these areas in one practice workflow:
 - Display facial-expression model outputs from the FER-2013 classifier.
 - Display confident/unconfident appearance-label outputs from the second classifier.
 - Recognise supported hand gestures using MediaPipe.
+
+### 📊 Session report
+
 - Generate a downloadable practice report.
 
-## How OpenRouter is used
+## 🔗 How OpenRouter is used
 
 OpenRouter connects Candidate360 to the selected large language model. The app sends the candidate’s CV, target role, job description, interview question and answer through the OpenRouter API. The language model then generates tailored questions and coaching feedback.
 
 OpenRouter provides the connection; the selected language model generates the output.
 
-## Speech transcription
+## 🗣️ Speech transcription
 
 Candidate360 supports two transcription routes:
 
@@ -60,7 +71,7 @@ For better transcription:
 - check and correct the transcript before evaluation;
 - use the Groq transcription route for Streamlit deployment when available.
 
-## Visual models
+## 👁️ Visual models
 
 | Component | Purpose |
 |---|---|
@@ -71,7 +82,7 @@ For better transcription:
 
 Visual labels are shown separately from the answer evaluation. They do not change the candidate’s answer score and should not be treated as verified emotions, confidence, personality or employability.
 
-## Required project structure
+## 📁 Required project structure
 
 ```text
 Candidate360/
@@ -93,7 +104,7 @@ Candidate360/
 
 The YOLO pose weights are loaded through Ultralytics. The MediaPipe task file can also be downloaded automatically by `vision_utils.py` if it is missing.
 
-## Streamlit secrets
+## 🔐 Streamlit secrets
 
 Open **Manage app → Settings → Secrets** and add:
 
@@ -107,7 +118,7 @@ GROQ_API_KEY = "your_groq_api_key"
 
 Do not place secret keys directly in `app.py`, `api_utils.py`, `README.md` or any GitHub file.
 
-## Run locally
+## 💻 Run locally
 
 1. Download or clone the repository.
 2. Open a terminal inside the project folder.
@@ -125,7 +136,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Deploy on Streamlit Community Cloud
+## ☁️ Deploy on Streamlit Community Cloud
 
 1. Upload all project files to the GitHub repository using the structure above.
 2. Keep `requirements.txt` and `packages.txt` in the same main folder as `app.py`.
@@ -135,7 +146,7 @@ streamlit run app.py
 6. Add the OpenRouter and Groq keys to Streamlit Secrets.
 7. Reboot the app after changing dependencies, model files or secrets.
 
-## Important limitations
+## ⚠️ Important limitations
 
 - Language-model feedback can be incomplete or incorrect and should be reviewed by the candidate.
 - Speech accuracy varies with language, accent, audio quality and background noise.
@@ -144,7 +155,7 @@ streamlit run app.py
 - Video analysis samples selected moments rather than processing every frame.
 - Candidate360 is designed for practice and self-reflection. It should not be used to make hiring decisions.
 
-## Technology used
+## 🧰 Technology used
 
 - Python
 - Streamlit
@@ -157,7 +168,7 @@ streamlit run app.py
 - MediaPipe
 - FFmpeg
 
-## Project author
+## 👤 Project author
 
 **Nadia Mohamed Fawzi**  
 General Assembly Data Science Bootcamp · 2026

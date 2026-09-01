@@ -104,6 +104,12 @@ Return JSON only with this exact structure:
     "skills_to_prove": ["skill 1", "skill 2", "skill 3"],
     "match_score": 0
   }},
+  "role_job_alignment": {{
+    "status": "match",
+    "score": 0,
+    "summary": "short explanation based only on the selected role or major and the job description",
+    "differences": ["important difference if any"]
+  }},
   "questions": [
     {{
       "type": "Behavioural",
@@ -116,8 +122,12 @@ Return JSON only with this exact structure:
 Return exactly six fair, role-related questions using a balanced mix of
 introduction, behavioural, situational, role-specific, CV-evidence and
 closing questions. The match score must be from 0 to 100 and is only a
-practice estimate. Use only supplied evidence. Do not infer protected or
-personal characteristics.
+practice estimate. Separately compare the selected target role or major with
+the job title, field, duties, qualifications and subject requirements stated
+in the job description. For role_job_alignment.status, return exactly one of
+"match", "partial_match" or "mismatch". The alignment score must be from 0
+to 100. Do not use the candidate's CV when deciding this separate alignment.
+Use only supplied evidence. Do not infer protected or personal characteristics.
 """
     system_message = (
         "You are a careful CV analyst and supportive interviewer. "
@@ -126,8 +136,22 @@ personal characteristics.
     result = get_json_response(prompt, system_message, api_key)
     cv_analysis = result.get("cv_analysis", {})
     cv_analysis["match_score"] = _clamp_score(cv_analysis.get("match_score", 0))
+    role_job_alignment = result.get("role_job_alignment", {})
+    role_job_alignment["score"] = _clamp_score(
+        role_job_alignment.get("score", 0)
+    )
+    valid_statuses = {"match", "partial_match", "mismatch"}
+    if role_job_alignment.get("status") not in valid_statuses:
+        alignment_score = role_job_alignment["score"]
+        if alignment_score >= 70:
+            role_job_alignment["status"] = "match"
+        elif alignment_score >= 40:
+            role_job_alignment["status"] = "partial_match"
+        else:
+            role_job_alignment["status"] = "mismatch"
     return {
         "cv_analysis": cv_analysis,
+        "role_job_alignment": role_job_alignment,
         "questions": result.get("questions", [])
     }
 

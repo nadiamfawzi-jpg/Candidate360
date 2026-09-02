@@ -1,0 +1,367 @@
+import os
+import re
+import subprocess
+import tempfile
+
+from mutagen import File as MutagenFile
+
+
+GROQ_TRANSCRIPTION_URL = (
+    "https://api.groq.com/openai/v1/audio/transcriptions"
+)
+GROQ_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
+def load_speech_model():
+    from transformers import pipeline
+
+    model_name = os.getenv("WHISPER_MODEL", "openai/whisper-base")
+    speech_model = pipeline(
+        "automatic-speech-recognition",
+        model=model_name,
+        device=-1
+    )
+    return speech_model
+
+
+def save_audio(uploaded_audio):
+    suffix = os.path.splitext(uploaded_audio.name)[1] or ".wav"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as audio_file:
+        audio_file.write(uploaded_audio.getbuffer())
+        audio_path = audio_file.name
+    return audio_path
+
+
+def transcribe_audio(
+    uploaded_audio,
+    speech_model=None,
+    language="auto",
+    transcription_api_key=""
+):
+    audio_path = save_audio(uploaded_audio)
+
+    try:
+        return transcribe_audio_path(
+            audio_path,
+            speech_model,
+            language,
+            transcription_api_key
+        )
+    finally:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+
+def transcribe_with_groq(audio_path, language, api_key):
+    import requests
+
+    data = {
+        "model": GROQ_TRANSCRIPTION_MODEL,
+        "response_format": "json",
+        "temperature": "0"
+    }
+
+    # Groq accepts ISO language codes. Common Candidate360 languages are
+    # mapped explicitly; other selections safely use automatic detection.
+    language_codes = {
+        "english": "en", "arabic": "ar", "french": "fr",
+        "spanish": "es", "german": "de", "italian": "it",
+        "portuguese": "pt", "russian": "ru", "chinese": "zh",
+        "japanese": "ja", "korean": "ko", "hindi": "hi",
+        "urdu": "ur", "turkish": "tr", "persian": "fa",
+        "dutch": "nl", "greek": "el", "hebrew": "he",
+        "polish": "pl", "romanian": "ro", "ukrainian": "uk",
+        "indonesian": "id", "malay": "ms", "bengali": "bn",
+        "tamil": "ta", "telugu": "te", "thai": "th",
+        "vietnamese": "vi"
+    }
+    selected_code = language_codes.get(str(language).lower())
+    if selected_code:
+        data["language"] = selected_code
+
+    try:
+        with open(audio_path, "rb") as audio_file:
+            response = requests.post(
+                GROQ_TRANSCRIPTION_URL,
+                headers={"Authorization": "Bearer " + api_key},
+                data=data,
+                files={
+                    "file": (
+                        os.path.basename(audio_path),
+                        audio_file,
+                        (
+                            "audio/mpeg"
+                            if audio_path.lower().endswith(".mp3")
+                            else "audio/wav"
+                        )
+                    )
+                },
+                timeout=180
+            )
+    except requests.RequestException as error:
+        raise RuntimeError(
+            "The high-accuracy transcription service could not be reached. "
+            "Check the GROQ_API_KEY and internet connection."
+        ) from error
+
+    if response.status_code >= 400:
+        try:
+            error_payload = response.json().get("error", {})
+            if isinstance(error_payload, dict):
+                error_message = error_payload.get("message", response.text)
+            else:
+                error_message = str(error_payload)
+        except ValueError:
+            error_message = response.text
+        raise RuntimeError(
+            "The high-accuracy transcription service returned an error: "
+            + str(error_message)[:500]
+        )
+
+    try:
+        transcript_text = response.json().get("text", "").strip()
+    except ValueError as error:
+        raise RuntimeError(
+            "The transcription service returned an unreadable response."
+        ) from error
+
+    if not transcript_text:
+        raise ValueError(
+            "No clear speech was detected. Check the microphone volume and "
+            "remove long silent sections before trying again."
+        )
+    return transcript_text
+
+
+def transcribe_audio_path(
+    audio_path,
+    speech_model=None,
+    language="auto",
+    transcription_api_key=""
+):
+    if not os.path.exists(audio_path) or os.path.getsize(audio_path) <= 44:
+        raise ValueError(
+            "The recording does not contain usable microphone audio. Allow "
+            "microphone access, select the correct microphone and record again."
+        )
+
+    if transcription_api_key:
+        return transcribe_with_groq(
+            audio_path,
+            language,
+            transcription_api_key
+        )
+
+    if speech_model is None:
+        speech_model = load_speech_model()
+
+    generate_kwargs = {
+        "task": "transcribe",
+        "condition_on_prev_tokens": False,
+        "temperature": 0.0,
+        "repetition_penalty": 1.1
+    }
+    if language and language != "auto":
+        generate_kwargs["language"] = language
+
+    transcript = speech_model(
+        audio_path,
+        chunk_length_s=20,
+        stride_length_s=3,
+        generate_kwargs=generate_kwargs
+    )
+    transcript_text = transcript.get("text", "").strip()
+    if not transcript_text:
+        raise ValueError(
+            "Whisper did not detect clear speech in the recording. Check the "
+            "microphone selection and volume, then record again."
+        )
+    return transcript_text
+
+
+def extract_audio_from_video(video_path):
+    """Create a compact 16 kHz mono audio file from a video recording."""
+    with tempfile.NamedTemporaryFile(
+        delete=False, prefix="candidate360_", suffix=".mp3"
+    ) as audio_file:
+        audio_path = audio_file.name
+
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        video_path,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-af",
+        "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "64k",
+        audio_path
+    ]
+
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+    except FileNotFoundError as error:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        raise RuntimeError(
+            "FFmpeg is required to read audio from the recorded video."
+        ) from error
+    except subprocess.CalledProcessError as error:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        details = (error.stderr or "").strip().splitlines()
+        message = details[-1] if details else "Unknown FFmpeg error"
+        raise RuntimeError(
+            "No usable microphone track was found in the recorded video. "
+            "Allow microphone access, select the correct microphone in the "
+            "camera panel and record again. Technical detail: " + message
+        ) from error
+
+    if not os.path.exists(audio_path) or os.path.getsize(audio_path) <= 44:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        raise RuntimeError(
+            "The video was saved without usable microphone audio. Allow "
+            "microphone access and select the correct microphone before START."
+        )
+
+    return audio_path
+
+
+def get_audio_duration(uploaded_audio):
+    """Read the recording duration without changing or resampling the audio."""
+    audio_path = save_audio(uploaded_audio)
+
+    try:
+        audio_information = MutagenFile(audio_path)
+        if audio_information is None or audio_information.info is None:
+            raise ValueError(
+                "The recording duration could not be read. Try WAV, MP3, "
+                "M4A or FLAC audio."
+            )
+
+        duration_seconds = float(audio_information.info.length)
+        if duration_seconds <= 0:
+            raise ValueError("The recording does not contain readable audio.")
+        return duration_seconds
+    finally:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+
+def get_audio_duration_path(audio_path):
+    audio_information = MutagenFile(audio_path)
+    if audio_information is None or audio_information.info is None:
+        raise ValueError("The recorded-video audio duration could not be read.")
+
+    duration_seconds = float(audio_information.info.length)
+    if duration_seconds <= 0:
+        raise ValueError("The recording does not contain readable audio.")
+    return duration_seconds
+
+
+def evaluate_voice_delivery(uploaded_audio, corrected_transcript):
+    """Return simple delivery observations from duration and transcript text."""
+    duration_seconds = get_audio_duration(uploaded_audio)
+    return evaluate_voice_delivery_values(
+        duration_seconds,
+        corrected_transcript
+    )
+
+
+def evaluate_voice_delivery_path(audio_path, corrected_transcript):
+    duration_seconds = get_audio_duration_path(audio_path)
+    return evaluate_voice_delivery_values(
+        duration_seconds,
+        corrected_transcript
+    )
+
+
+def evaluate_voice_delivery_values(duration_seconds, corrected_transcript):
+    transcript = corrected_transcript.strip()
+    if not transcript:
+        raise ValueError("Create and check the transcript before evaluating delivery.")
+
+    words = re.findall(r"\b[\w'-]+\b", transcript, flags=re.UNICODE)
+    word_count = len(words)
+    words_per_minute = round(word_count / duration_seconds * 60)
+
+    filler_patterns = {
+        "um": r"\b(?:um+|umm+)\b",
+        "uh": r"\b(?:uh+|uhh+)\b",
+        "you know": r"\byou\s+know\b",
+        "يعني": r"\bيعني\b",
+        "امم": r"\b(?:ام+|أم+)\b",
+    }
+
+    filler_details = {}
+    for label, pattern in filler_patterns.items():
+        matches = re.findall(pattern, transcript, flags=re.IGNORECASE)
+        if matches:
+            filler_details[label] = len(matches)
+
+    filler_count = sum(filler_details.values())
+    filler_rate = round(filler_count / max(word_count, 1) * 100, 1)
+
+    if words_per_minute < 100:
+        pace_label = "Slow"
+        pace_feedback = (
+            "The pace was slower than the broad practice range. Rehearse once "
+            "more while keeping short, natural pauses."
+        )
+    elif words_per_minute <= 170:
+        pace_label = "Balanced"
+        pace_feedback = (
+            "The speaking pace was within the broad interview-practice range."
+        )
+    else:
+        pace_label = "Fast"
+        pace_feedback = (
+            "The pace was faster than the broad practice range. Slow slightly "
+            "and separate the main points."
+        )
+
+    if filler_rate <= 2:
+        filler_label = "Few detected"
+        filler_feedback = "Few listed filler words were detected in the transcript."
+    elif filler_rate <= 5:
+        filler_label = "Some detected"
+        filler_feedback = (
+            "Some listed filler words were detected. Replace them with a short pause."
+        )
+    else:
+        filler_label = "Frequent"
+        filler_feedback = (
+            "Listed filler words appeared frequently. Practise the answer in "
+            "shorter sections and pause between ideas."
+        )
+
+    feedback = [pace_feedback, filler_feedback]
+    if duration_seconds < 15:
+        feedback.append(
+            "The recording was brief. Check that the answer includes an example "
+            "and a clear result where the question requires them."
+        )
+
+    return {
+        "duration_seconds": round(duration_seconds, 1),
+        "word_count": word_count,
+        "words_per_minute": words_per_minute,
+        "pace_label": pace_label,
+        "filler_count": filler_count,
+        "filler_rate": filler_rate,
+        "filler_label": filler_label,
+        "filler_details": filler_details,
+        "feedback": feedback,
+    }

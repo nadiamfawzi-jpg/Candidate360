@@ -1,4 +1,4 @@
-# 🎯 Candidate360
+# 💼 Candidate360
 
 Candidate360 is an AI-powered interview-practice application that adapts each session to the candidate’s CV, selected role and job description. It combines tailored questions with answer coaching, multilingual speech transcription and separate visual-delivery observations.
 
@@ -87,7 +87,7 @@ Visual labels are shown separately from the answer evaluation. They do not chang
 ```text
 Candidate360/
 ├── app.py
-├── api_utils.py
+├── candidate360_api.py
 ├── document_utils.py
 ├── speech_utils.py
 ├── vision_utils.py
@@ -116,7 +116,7 @@ GROQ_API_KEY = "your_groq_api_key"
 - `OPENROUTER_API_KEY` enables tailored questions and answer feedback.
 - `GROQ_API_KEY` enables the recommended hosted multilingual transcription.
 
-Do not place secret keys directly in `app.py`, `api_utils.py`, `README.md` or any GitHub file.
+Do not place secret keys directly in `app.py`, `candidate360_api.py`, `README.md` or any GitHub file.
 
 ## 💻 Run locally
 
@@ -172,3 +172,4 @@ streamlit run app.py
 
 **Nadia Mohamed Fawzi**  
 General Assembly Data Science Bootcamp · 2026
+
